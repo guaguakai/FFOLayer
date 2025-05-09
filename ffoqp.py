@@ -9,14 +9,14 @@ import scipy
 import time
 import cvxpy
 # import solvers
-from qpthlocal.solvers.pdipm import batch as pdipm_b
-from qpthlocal.solvers.pdipm import spbatch as pdipm_spb
-from qpthlocal.solvers.cvxpy import forward_single_np
+# from qpthlocal.solvers.pdipm import batch as pdipm_b
+# from qpthlocal.solvers.pdipm import spbatch as pdipm_spb
+# from qpthlocal.solvers.cvxpy import forward_single_np
+from utils import forward_single_np
 from enum import Enum
 from utils import extract_nBatch, expandParam
 from typing import cast, List, Optional, Union
 
-from qpthlocal.qp import QPSolvers
 # from cvxpylayers.torch import CvxpyLayer
 
 # class QPSolvers(Enum):
@@ -33,7 +33,7 @@ from qpthlocal.qp import QPSolvers
 #         self.solver = solver if solver is not None else QPSolvers.CVXPY
 #         self.lamb = lamb
 
-def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, solver=QPSolvers.CVXPY, lamb=100, check_Q_spd=True):
+def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, lamb=100, check_Q_spd=True):
 
     class QPFunctionFn(torch.autograd.Function):
         @staticmethod
@@ -59,38 +59,39 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, solver=QPSolvers.C
             assert(neq > 0 or nineq > 0)
             ctx.neq, ctx.nineq, ctx.nz = neq, nineq, nz
 
-            if solver == QPSolvers.PDIPM_BATCHED:
-                ctx.Q_LU, ctx.S_LU, ctx.R = pdipm_b.pre_factor_kkt(Q, G, A)
-                zhats, nus, lams, slacks = pdipm_b.forward(
-                    Q, p, G, h, A, b, ctx.Q_LU, ctx.S_LU, ctx.R,
-                    eps, verbose, notImprovedLim, maxIter)
-            elif solver == QPSolvers.CVXPY:
-                vals = torch.Tensor(nBatch).type_as(Q)
-                zhats = torch.Tensor(nBatch, ctx.nz).type_as(Q)
-                lams = torch.Tensor(nBatch, ctx.nineq).type_as(Q)
-                nus = torch.Tensor(nBatch, ctx.neq).type_as(Q) \
-                    if ctx.neq > 0 else torch.Tensor()
-                slacks = torch.Tensor(nBatch, ctx.nineq).type_as(Q)
+            # if solver == QPSolvers.PDIPM_BATCHED:
+            #     ctx.Q_LU, ctx.S_LU, ctx.R = pdipm_b.pre_factor_kkt(Q, G, A)
+            #     zhats, nus, lams, slacks = pdipm_b.forward(
+            #         Q, p, G, h, A, b, ctx.Q_LU, ctx.S_LU, ctx.R,
+            #         eps, verbose, notImprovedLim, maxIter)
+            # elif solver == QPSolvers.CVXPY:
+            vals = torch.Tensor(nBatch).type_as(Q)
+            zhats = torch.Tensor(nBatch, ctx.nz).type_as(Q)
+            lams = torch.Tensor(nBatch, ctx.nineq).type_as(Q)
+            nus = torch.Tensor(nBatch, ctx.neq).type_as(Q) \
+                if ctx.neq > 0 else torch.Tensor()
+            slacks = torch.Tensor(nBatch, ctx.nineq).type_as(Q)
 
-                for i in range(nBatch):
-                    Ai, bi = (A[i], b[i]) if neq > 0 else (None, None)
-                    vals[i], zhati, nui, lami, si = forward_single_np(
-                        *[x.cpu().numpy() if x is not None else None
-                        for x in (Q[i], p[i], G[i], h[i], Ai, bi)])
-                    # if zhati[0] is None:
-                    #     import IPython, sys; IPython.embed(); sys.exit(-1)
-                    zhats[i] = torch.Tensor(zhati)
-                    lams[i] = torch.Tensor(lami)
-                    slacks[i] = torch.Tensor(si)
-                    if neq > 0:
-                        nus[i] = torch.Tensor(nui)
+            for i in range(nBatch):
+                Ai, bi = (A[i], b[i]) if neq > 0 else (None, None)
+                vals[i], zhati, nui, lami, si = forward_single_np(
+                    *[x.cpu().numpy() if x is not None else None
+                    for x in (Q[i], p[i], G[i], h[i], Ai, bi)])
+                # if zhati[0] is None:
+                #     import IPython, sys; IPython.embed(); sys.exit(-1)
+                zhats[i] = torch.Tensor(zhati)
+                lams[i] = torch.Tensor(lami)
+                slacks[i] = torch.Tensor(si)
+                if neq > 0:
+                    nus[i] = torch.Tensor(nui)
 
-                ctx.vals = vals
-                ctx.lams = lams
-                ctx.nus = nus
-                ctx.slacks = slacks
-            else:
-                raise NotImplementedError("Solver not implemented")
+            ctx.vals = vals
+            ctx.lams = lams
+            ctx.nus = nus
+            ctx.slacks = slacks
+
+            # else:
+            #     raise NotImplementedError("Solver not implemented")
 
             # ctx.vals = vals
             ctx.lams = lams
@@ -167,8 +168,8 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, solver=QPSolvers.C
                 h_active = h.unsqueeze(-1) * active_constraints
                 newQ = Q + lamb * G_active.transpose(-1,-2) @ G_active # + torch.eye(nz).repeat(nBatch, 1, 1).to(Q.device)
                 newp = p.unsqueeze(-1) + delta_directions / lamb - lamb * G_active.transpose(-1,-2) @ h_active + G.transpose(-1,-2) @ lams.unsqueeze(-1) # - zhats
-                print('newQ, newp shape:', newQ.shape, newp.shape)
-                print('A, b shape:', A.shape, b.shape)
+                # print('newQ, newp shape:', newQ.shape, newp.shape)
+                # print('A, b shape:', A.shape, b.shape)
                 if neq > 0:
                     newQ = torch.cat((newQ, lamb * A), dim=1)
                     newp = torch.cat((newp, - lamb * b.unsqueeze(-1)), dim=1)
@@ -177,7 +178,7 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, solver=QPSolvers.C
                 newzhat = torch.linalg.lstsq(newQ, -newp, driver='gels').solution
                 # newzhat = - newQ.pinverse() @ newp
             # print('prediction', p)
-            print('solution distance:', torch.linalg.norm(newzhat - zhats))
+            # print('solution distance:', torch.linalg.norm(newzhat - zhats))
             # print(lams)
             # print(zhats)
             # print(newzhat)

@@ -4,7 +4,7 @@ import torch
 import numpy as np
 import unittest
 # import qpth
-from qpthlocal.qp import QPSolvers
+# from qpthlocal.qp import QPSolvers
 from cvxpylayers.torch import CvxpyLayer
 import cvxpy as cp
 
@@ -55,8 +55,8 @@ class TestFFOQP(unittest.TestCase):
 
         # Create an instance of the FFOQP class
         # solver = QPSolvers.PDIPM_BATCHED
-        solver = QPSolvers.CVXPY
-        ffoqp_instance = ffoqp.ffoqp(lamb=100, solver=solver)
+        # solver = QPSolvers.CVXPY
+        ffoqp_instance = ffoqp.ffoqp(lamb=100)
 
         # Forward pass through the FFOQP instance
         print('solving qp...')
@@ -123,8 +123,8 @@ class TestFFOQP(unittest.TestCase):
 
         # Create an instance of the FFOQP class
         # solver = QPSolvers.PDIPM_BATCHED
-        solver = QPSolvers.CVXPY
-        ffoqp_instance = ffoqp.ffoqp(lamb=100, solver=solver)
+        # solver = QPSolvers.CVXPY
+        ffoqp_instance = ffoqp.ffoqp(lamb=100)
 
         # Forward pass through the FFOQP instance
         print('solving qp...')

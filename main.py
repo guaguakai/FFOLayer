@@ -6,7 +6,7 @@ import os
 import argparse
 import tqdm
 # import qpth
-from qpthlocal.qp import QPFunction, QPSolvers
+from qpth.qp import QPFunction
 import pickle
 from cvxpylayers.torch import CvxpyLayer
 import cvxpy as cp
@@ -43,7 +43,7 @@ if __name__ == '__main__':
     np.random.seed(seed)
 
     input_dim   = 640
-    output_dim  = 32
+    output_dim  = 512
     n = output_dim
     num_samples = 2048
     batch_size = 32
@@ -91,10 +91,9 @@ if __name__ == '__main__':
     # Solver options
     # Note: the current version only works for the CVXPY solver
     # solver = QPSolvers.PDIPM_BATCHED
-    solver = QPSolvers.CVXPY
 
-    ffoqp_layer = ffoqp.ffoqp(lamb=lamb, solver=solver, verbose=-1)
-    qpth_layer = QPFunction(verbose=-1,  solver=solver)
+    ffoqp_layer = ffoqp.ffoqp(lamb=lamb, verbose=-1)
+    qpth_layer = QPFunction(verbose=-1)
 
     s = 0
     ts_weight = 0
