@@ -114,3 +114,10 @@ Epoch 2, train_loss: 2.40, test_loss: 5.06, hold_loss: 3.85
 + SQP Iter: 8, Solution diff = 2.5292770795211377e-09
 + SQP Iter: 9, Solution diff = 1.0099363232691673e-10
 + SQP Iter: 10, Solution diff = 9.776634901142764e-11
++ SQP Iter: 0, Solution diff = 8.584166577063225
++ SQP Iter: 1, Solution diff = 3.6510517746177937
++ SQP Iter: 2, Solution diff = 2.2432470245766036
++ SQP Iter: 3, Solution diff = 0.985553606039349
++ SQP Iter: 4, Solution diff = 0.17531872869599807
++ SQP Iter: 5, Solution diff = 0.005185655452761229
++ SQP Iter: 6, Solution diff = 5.527339182470332e-06

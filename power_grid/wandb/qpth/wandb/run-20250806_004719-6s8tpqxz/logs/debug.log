@@ -19,3 +19,4 @@ config: {'task': 'qpth', 'save': None, 'nRuns': 1, 'seed': 0, '_wandb': {'code_p
 2025-08-06 00:47:21,586 INFO    MainThread:1876188 [wandb_run.py:_redirect():2375] Wrapping output streams.
 2025-08-06 00:47:21,586 INFO    MainThread:1876188 [wandb_run.py:_redirect():2398] Redirects installed.
 2025-08-06 00:47:21,594 INFO    MainThread:1876188 [wandb_init.py:init():1075] run started, returning control to user process
+2025-08-06 00:53:45,729 INFO    MsgRouterThr:1876188 [mailbox.py:close():129] [no run ID] Closing mailbox, abandoning 1 handles.
