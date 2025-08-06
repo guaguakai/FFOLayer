@@ -1,0 +1,57 @@
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:131: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_load = df_load.transpose().fillna(method="backfill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:132: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_load = df_load.transpose().fillna(method="ffill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:133: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_temp = df_temp.transpose().fillna(method="backfill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:134: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_temp = df_temp.transpose().fillna(method="ffill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:131: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_load = df_load.transpose().fillna(method="backfill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:132: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_load = df_load.transpose().fillna(method="ffill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:133: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_temp = df_temp.transpose().fillna(method="backfill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:134: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_temp = df_temp.transpose().fillna(method="ffill").transpose()
+200 0.00708649680018425 0.009315756149590015
+400 0.005055609159171581 0.009145401418209076
+600 0.00438398402184248 0.009122548624873161
+800 0.003887909697368741 0.008936104364693165
+1000 0.003634675405919552 0.009069028310477734
+Traceback (most recent call last):
+  File "/nethome/zzhao628/ffo-bilevel/power_grid/main.py", line 169, in <module>
+    main()
+  File "/nethome/zzhao628/ffo-bilevel/power_grid/main.py", line 110, in main
+    model_task = nets.run_task_net(
+  File "/nethome/zzhao628/ffo-bilevel/power_grid/nets.py", line 137, in run_task_net
+    Y_sched_train = solver(mu_pred_train.double(), sig_pred_train.double())
+  File "/nethome/zzhao628/anaconda3/envs/bilevel/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/nethome/zzhao628/anaconda3/envs/bilevel/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/nethome/zzhao628/ffo-bilevel/power_grid/model_classes.py", line 261, in forward
+    z0_new = SolveSchedulingBL(self.params, is_eq_cst=False)(z0, mu0, dg, d2g)
+  File "/nethome/zzhao628/anaconda3/envs/bilevel/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/nethome/zzhao628/anaconda3/envs/bilevel/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/nethome/zzhao628/ffo-bilevel/power_grid/model_classes.py", line 219, in forward
+    out = ffoqp_instance(Q, p, G, h, self.e, self.e)
+  File "/nethome/zzhao628/anaconda3/envs/bilevel/lib/python3.10/site-packages/torch/autograd/function.py", line 575, in apply
+    return super().apply(*args, **kwargs)  # type: ignore[misc]
+  File "/nethome/zzhao628/ffo-bilevel/ffoqp.py", line 77, in forward
+    vals[i], zhati, nui, lami, si = forward_single_np(
+  File "/nethome/zzhao628/ffo-bilevel/utils.py", line 115, in forward_single_np
+    prob.solve(solver=cp.GUROBI, verbose=False) # max_iters=5000)
+  File "/nethome/zzhao628/anaconda3/envs/bilevel/lib/python3.10/site-packages/cvxpy/problems/problem.py", line 609, in solve
+    return solve_func(self, *args, **kwargs)
+  File "/nethome/zzhao628/anaconda3/envs/bilevel/lib/python3.10/site-packages/cvxpy/problems/problem.py", line 1191, in _solve
+    data, solving_chain, inverse_data = self.get_problem_data(
+  File "/nethome/zzhao628/anaconda3/envs/bilevel/lib/python3.10/site-packages/cvxpy/problems/problem.py", line 755, in get_problem_data
+    solving_chain = self._construct_chain(
+  File "/nethome/zzhao628/anaconda3/envs/bilevel/lib/python3.10/site-packages/cvxpy/problems/problem.py", line 1007, in _construct_chain
+    candidate_solvers = self._find_candidate_solvers(solver=solver, gp=gp)
+  File "/nethome/zzhao628/anaconda3/envs/bilevel/lib/python3.10/site-packages/cvxpy/problems/problem.py", line 870, in _find_candidate_solvers
+    raise error.SolverError("The solver %s is not installed." % solver)
+cvxpy.error.SolverError: The solver GUROBI is not installed.

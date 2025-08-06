@@ -10,7 +10,8 @@ import torch.optim as optim
 
 import model_classes
 from constants import *
-
+import wandb
+import time
 
 
 def task_loss(Y_sched, Y_actual, params):
@@ -132,10 +133,16 @@ def run_task_net(model, solver, variables, params, X_train, Y_train, args):
         opt.zero_grad()
         model.train()
         mu_pred_train, sig_pred_train = model(variables['X_train_'])
+        time_train = time.time()
         Y_sched_train = solver(mu_pred_train.double(), sig_pred_train.double())
+        solve_time = time.time() - time_train
+        
         train_loss = task_loss(
             Y_sched_train.float(),variables['Y_train_'], params)
+        
+        time_backward = time.time()
         train_loss.sum().backward()
+        backward_time = time.time() - time_backward
 
         model.eval()
         mu_pred_test, sig_pred_test = model(variables['X_test_'])
@@ -151,6 +158,14 @@ def run_task_net(model, solver, variables, params, X_train, Y_train, args):
         opt.step()
 
         print(f"Epoch {i}, train_loss: {train_loss.sum().item():.2f}, test_loss: {test_loss.sum().item():.2f}, hold_loss: {hold_loss.sum().item():.2f}")
+
+        wandb.log({
+            "train_loss": train_loss.sum().item(),
+            "test_loss": test_loss.sum().item(),
+            "hold_loss": hold_loss.sum().item(),
+            "solve_time": solve_time,
+            "backward_time": backward_time,
+        })
 
 
         # Early stopping

@@ -1,0 +1,27 @@
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:131: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_load = df_load.transpose().fillna(method="backfill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:132: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_load = df_load.transpose().fillna(method="ffill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:133: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_temp = df_temp.transpose().fillna(method="backfill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:134: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_temp = df_temp.transpose().fillna(method="ffill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:131: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_load = df_load.transpose().fillna(method="backfill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:132: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_load = df_load.transpose().fillna(method="ffill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:133: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_temp = df_temp.transpose().fillna(method="backfill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:134: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_temp = df_temp.transpose().fillna(method="ffill").transpose()
+200 0.00708649680018425 0.009315756149590015
+400 0.005055609159171581 0.009145401418209076
+600 0.00438398402184248 0.009122548624873161
+800 0.003887909697368741 0.008936104364693165
+1000 0.003634675405919552 0.009069028310477734
+Set parameter WLSAccessID
+Set parameter WLSSecret
+Set parameter LicenseID to value 2663179
+Academic license 2663179 - for non-commercial use only - registered to zz___@gatech.edu
++ SQP Iter: 0, Solution diff = 15.277747114436707
++ SQP Iter: 1, Solution diff = 6.49836071038086

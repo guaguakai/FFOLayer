@@ -1,0 +1,97 @@
+_wandb:
+    value:
+        cli_version: 0.21.0
+        code_path: code/power_grid/main.py
+        e:
+            36rtf2ci6l5r1vd9mz7r7iysm2fbb2z3:
+                args:
+                    - --task
+                    - ffoqp
+                codePath: power_grid/main.py
+                codePathLocal: main.py
+                cpu_count: 120
+                cpu_count_logical: 240
+                cudaVersion: "12.5"
+                disk:
+                    /:
+                        total: "7617636294656"
+                        used: "268927307776"
+                email: zhao-zh21@mails.tsinghua.edu.cn
+                executable: /nethome/zzhao628/anaconda3/envs/bilevel/bin/python
+                git:
+                    commit: 5a5404c2f6f6ad745a530b48079fff9c78b1e594
+                    remote: https://github.com/guaguakai/ffo-bilevel.git
+                gpu: NVIDIA H100 80GB HBM3
+                gpu_count: 8
+                gpu_nvidia:
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-731dbe21-8365-ef1f-04dc-5f04615685fe
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-c441523b-3c96-f239-b998-b4eaf24f854a
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-332524b6-e4d6-4d51-4267-e74f9d7cce7d
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-dfd05fcb-2d00-990a-dc38-1e38ce22eb2d
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-0f48937b-82f4-bf1f-e24b-8013aead1c1f
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-ddbf30aa-9711-94d5-2d46-9229106c50c8
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-49888b8f-006a-6b55-e6e7-f0b9333c611c
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-3c160d5f-167a-e705-cd97-980f93e69750
+                host: kings
+                memory:
+                    total: "1081790496768"
+                os: Linux-5.15.0-143-generic-x86_64-with-glibc2.35
+                program: /nethome/zzhao628/ffo-bilevel/power_grid/main.py
+                python: CPython 3.10.14
+                root: wandb/ffoqp
+                startedAt: "2025-08-06T04:50:08.728919Z"
+                writerId: 36rtf2ci6l5r1vd9mz7r7iysm2fbb2z3
+        m: []
+        python_version: 3.10.14
+        t:
+            "1":
+                - 1
+            "2":
+                - 1
+            "3":
+                - 13
+                - 16
+            "4": 3.10.14
+            "5": 0.21.0
+            "12": 0.21.0
+            "13": linux-x86_64
+nRuns:
+    value: 1
+save:
+    value: null
+seed:
+    value: 0
+task:
+    value: ffoqp

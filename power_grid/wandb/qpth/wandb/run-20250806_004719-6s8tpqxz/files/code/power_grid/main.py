@@ -43,7 +43,7 @@ def main():
     wandb.login(key="9459f0100021f1abd3867bedcda1b47716e21a34")
     if not os.path.exists(f"wandb/{args.task}"):
         os.makedirs(f"wandb/{args.task}")
-    wandb.init(project=f"bilevel_layer_ps_{args.task}", name=f"power_grid_{time_str}", config=vars(args), dir=f"wandb/{args.task}")
+    wandb.init(project=f"ps_{args.task}", name=f"power_grid_{time_str}", config=vars(args), dir=f"wandb/{args.task}")
 
     dataset_dir = os.path.dirname(os.path.abspath(__file__))
     X1, Y1 = load_data_with_features(os.path.join(dataset_dir, 'pjm_load_data_2008-11.txt'))

@@ -1,0 +1,140 @@
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:131: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_load = df_load.transpose().fillna(method="backfill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:132: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_load = df_load.transpose().fillna(method="ffill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:133: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_temp = df_temp.transpose().fillna(method="backfill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:134: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_temp = df_temp.transpose().fillna(method="ffill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:131: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_load = df_load.transpose().fillna(method="backfill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:132: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_load = df_load.transpose().fillna(method="ffill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:133: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_temp = df_temp.transpose().fillna(method="backfill").transpose()
+/nethome/zzhao628/ffo-bilevel/power_grid/main.py:134: FutureWarning: DataFrame.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  df_temp = df_temp.transpose().fillna(method="ffill").transpose()
+200 0.00708649680018425 0.009315756149590015
+400 0.005055609159171581 0.009145401418209076
+600 0.00438398402184248 0.009122548624873161
+800 0.003887909697368741 0.008936104364693165
+1000 0.003634675405919552 0.009069028310477734
+/nethome/zzhao628/anaconda3/envs/bilevel/lib/python3.10/site-packages/scs/__init__.py:83: UserWarning: Converting A to a CSC (compressed sparse column) matrix; may take a while.
+  warn(
++ SQP Iter: 0, Solution diff = 15.27774887391958
++ SQP Iter: 1, Solution diff = 6.498361808585126
++ SQP Iter: 2, Solution diff = 3.9933918858390784
++ SQP Iter: 3, Solution diff = 1.7553226179294605
++ SQP Iter: 4, Solution diff = 0.3125717170273909
++ SQP Iter: 5, Solution diff = 0.00926229117370159
++ SQP Iter: 6, Solution diff = 9.907082516806076e-06
++ SQP Iter: 7, Solution diff = 1.981090982012602e-09
++ SQP Iter: 8, Solution diff = 6.651738793197002e-12
++ SQP Iter: 0, Solution diff = 8.546374651757002
++ SQP Iter: 1, Solution diff = 3.6351844174510988
++ SQP Iter: 2, Solution diff = 2.233903925806684
++ SQP Iter: 3, Solution diff = 0.9819276947692974
++ SQP Iter: 4, Solution diff = 0.1748526575573476
++ SQP Iter: 5, Solution diff = 0.005181327094984154
++ SQP Iter: 6, Solution diff = 5.542255940677644e-06
++ SQP Iter: 7, Solution diff = 5.851370908862634e-11
++ SQP Iter: 0, Solution diff = 7.642614399922724
++ SQP Iter: 1, Solution diff = 3.250771690652402
++ SQP Iter: 2, Solution diff = 1.9976735174230977
++ SQP Iter: 3, Solution diff = 0.8780910087192567
++ SQP Iter: 4, Solution diff = 0.15636237548964574
++ SQP Iter: 5, Solution diff = 0.004633413360026703
++ SQP Iter: 6, Solution diff = 4.95598167828059e-06
++ SQP Iter: 7, Solution diff = 1.0892703176277027e-09
++ SQP Iter: 8, Solution diff = 1.6329093668902062e-12
+Epoch 0, train_loss: 2.84, test_loss: 6.68, hold_loss: 4.47
++ SQP Iter: 0, Solution diff = 15.302819269643944
++ SQP Iter: 1, Solution diff = 6.508892312445374
++ SQP Iter: 2, Solution diff = 3.999601191959641
++ SQP Iter: 3, Solution diff = 1.757742524672703
++ SQP Iter: 4, Solution diff = 0.3128864234893158
++ SQP Iter: 5, Solution diff = 0.009265370329133247
++ SQP Iter: 6, Solution diff = 9.897169759599041e-06
++ SQP Iter: 7, Solution diff = 3.993520565712592e-09
++ SQP Iter: 8, Solution diff = 3.3134366361640675e-12
++ SQP Iter: 0, Solution diff = 8.560399034537774
++ SQP Iter: 1, Solution diff = 3.641075182477111
++ SQP Iter: 2, Solution diff = 2.2373774124214836
++ SQP Iter: 3, Solution diff = 0.9832813903859817
++ SQP Iter: 4, Solution diff = 0.17502870481745925
++ SQP Iter: 5, Solution diff = 0.005183049665197772
++ SQP Iter: 6, Solution diff = 5.536416466475932e-06
++ SQP Iter: 7, Solution diff = 1.0695087098286994e-09
++ SQP Iter: 8, Solution diff = 1.873333168277318e-12
++ SQP Iter: 0, Solution diff = 7.655155735362462
++ SQP Iter: 1, Solution diff = 3.2560395203691925
++ SQP Iter: 2, Solution diff = 2.0007796907470876
++ SQP Iter: 3, Solution diff = 0.8793015542434134
++ SQP Iter: 4, Solution diff = 0.1565198054326802
++ SQP Iter: 5, Solution diff = 0.0046349534633281075
++ SQP Iter: 6, Solution diff = 4.950826030151549e-06
++ SQP Iter: 7, Solution diff = 5.997028646793916e-11
+Epoch 1, train_loss: 2.56, test_loss: 5.83, hold_loss: 4.13
++ SQP Iter: 0, Solution diff = 15.325234574939147
++ SQP Iter: 1, Solution diff = 6.518306560845412
++ SQP Iter: 2, Solution diff = 4.0051503636561305
++ SQP Iter: 3, Solution diff = 1.7599031384636317
++ SQP Iter: 4, Solution diff = 0.31316696301673047
++ SQP Iter: 5, Solution diff = 0.00926814086905494
++ SQP Iter: 6, Solution diff = 9.888563228363128e-06
++ SQP Iter: 7, Solution diff = 3.053395734887305e-09
++ SQP Iter: 8, Solution diff = 3.3033131916832004e-12
++ SQP Iter: 0, Solution diff = 8.572938159135576
++ SQP Iter: 1, Solution diff = 3.6463415142229443
++ SQP Iter: 2, Solution diff = 2.2404816197500668
++ SQP Iter: 3, Solution diff = 0.9844900383796937
++ SQP Iter: 4, Solution diff = 0.17518563828171857
++ SQP Iter: 5, Solution diff = 0.00518459935690871
++ SQP Iter: 6, Solution diff = 5.531970305500611e-06
++ SQP Iter: 7, Solution diff = 2.8532021789768593e-09
++ SQP Iter: 8, Solution diff = 1.852253572068364e-12
++ SQP Iter: 0, Solution diff = 7.666368875086856
++ SQP Iter: 1, Solution diff = 3.260748949143435
++ SQP Iter: 2, Solution diff = 2.003555634880731
++ SQP Iter: 3, Solution diff = 0.8803823902636619
++ SQP Iter: 4, Solution diff = 0.15666014378071963
++ SQP Iter: 5, Solution diff = 0.004636339408788358
++ SQP Iter: 6, Solution diff = 4.94693262100854e-06
++ SQP Iter: 7, Solution diff = 2.5490475746638963e-09
++ SQP Iter: 8, Solution diff = 1.5805536294604202e-12
+Epoch 2, train_loss: 2.40, test_loss: 5.05, hold_loss: 3.85
++ SQP Iter: 0, Solution diff = 15.345337426422555
++ SQP Iter: 1, Solution diff = 6.526742195560699
++ SQP Iter: 2, Solution diff = 4.010108203997887
++ SQP Iter: 3, Solution diff = 1.7618166507855682
++ SQP Iter: 4, Solution diff = 0.31340944929181785
++ SQP Iter: 5, Solution diff = 0.009270288447112562
++ SQP Iter: 6, Solution diff = 9.881019850296348e-06
++ SQP Iter: 7, Solution diff = 6.271082153816352e-09
++ SQP Iter: 8, Solution diff = 3.350750549621011e-12
++ SQP Iter: 0, Solution diff = 8.584183696641967
++ SQP Iter: 1, Solution diff = 3.651060409683263
++ SQP Iter: 2, Solution diff = 2.2432550364222106
++ SQP Iter: 3, Solution diff = 0.9855604571399554
++ SQP Iter: 4, Solution diff = 0.1753212854346277
++ SQP Iter: 5, Solution diff = 0.005185800363557312
++ SQP Iter: 6, Solution diff = 5.527466072952998e-06
++ SQP Iter: 7, Solution diff = 5.6348165675309236e-11
++ SQP Iter: 0, Solution diff = 7.676425222073939
++ SQP Iter: 1, Solution diff = 3.2649688316569683
++ SQP Iter: 2, Solution diff = 2.0060357686042836
++ SQP Iter: 3, Solution diff = 0.8813396147130667
++ SQP Iter: 4, Solution diff = 0.15678144669314956
++ SQP Iter: 5, Solution diff = 0.0046374133016528615
++ SQP Iter: 6, Solution diff = 4.942966578952846e-06
++ SQP Iter: 7, Solution diff = 7.329682550521394e-11
+Epoch 3, train_loss: 2.31, test_loss: 4.48, hold_loss: 3.66
++ SQP Iter: 0, Solution diff = 15.362541572805354
++ SQP Iter: 1, Solution diff = 6.533964846467531
++ SQP Iter: 2, Solution diff = 4.0143601150780786
++ SQP Iter: 3, Solution diff = 1.763466972836742
++ SQP Iter: 4, Solution diff = 0.3136228264019556
++ SQP Iter: 5, Solution diff = 0.00927243580940976
++ SQP Iter: 6, Solution diff = 9.87426678819966e-06
++ SQP Iter: 7, Solution diff = 3.50403323110929e-09
++ SQP Iter: 8, Solution diff = 3.34554382972682e-12
