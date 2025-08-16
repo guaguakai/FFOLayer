@@ -1,5 +1,6 @@
 import ffoqp
 import ffoqp_eq_cst
+import ffoqp_lpgd
 import torch
 import numpy as np
 import unittest
@@ -86,6 +87,8 @@ def test_ffoqp_equality(eps_grid):
           ffoqp.ffoqp(lamb=100, solver=solver, solver_opts=solver_opts),
         'ffoqp_eq_cst': lambda solver, solver_opts:
           ffoqp_eq_cst.ffoqp(alpha=100, solver=solver, solver_opts=solver_opts),
+        'ffoqp_lpgd': lambda solver, solver_opts:
+          ffoqp_lpgd.ffoqp(alpha=100, solver=solver, solver_opts=solver_opts),
     }
     grad_diffs = {k: [] for k in cand_cls.keys()}
     grad_corrs = {k: [] for k in cand_cls.keys()}
