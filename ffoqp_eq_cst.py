@@ -33,8 +33,9 @@ from typing import cast, List, Optional, Union
 #         self.solver = solver if solver is not None else QPSolvers.CVXPY
 #         self.lamb = lamb
 
-def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, check_Q_spd=True, chunk_size=100,
-          solver='GUROBI', solver_opts={"verbose": False}):
+def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=1, check_Q_spd=True, chunk_size=100,
+          solver='GUROBI', solver_opts={"verbose": False},
+          exact_bwd_sol=False):
     """ -> kamo
     change lamb to alpha to prevent confusion
     """
@@ -162,22 +163,34 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, check_Q
                 G_active = torch.cat((G_active, A), dim=1)
                 h_active = torch.cat((h_active, b.unsqueeze(-1)), dim=1)
 
-            for i in range(0, nBatch, chunk_size):
-                if chunk_size > 1:
-                    size = min(chunk_size, nBatch - i)
-                    i = slice(i, i + size)
-                    _, zhati, nui, _, _ = forward_batch_np(
-                        *[x.cpu().numpy() if x is not None else None
-                          for x in (Q[i], newp[i, :, 0], None, None, G_active[i], h_active[i, :, 0])],
-                        solver=solver, solver_opts=solver_opts)
-                else:
-                    _, zhati, nui, _, _ = forward_single_np_eq_cst(
-                        *[x.cpu().numpy() if x is not None else None
-                          for x in (Q[i], newp[i, :, 0], None, None, G_active[i], h_active[i, :, 0])])
+            if exact_bwd_sol:
+                Lq, Qq = torch.linalg.eigh(Q)
+                rsqrtQ = Qq @ torch.diag_embed(torch.rsqrt(Lq)) @ Qq.transpose(-1, -2)
+                aapl = rsqrtQ @ -delta_directions
+                Aq = G_active @ rsqrtQ
+                pine = torch.linalg.lstsq(Aq, Aq @ aapl).solution
+                dlam = torch.linalg.lstsq(Aq.transpose(-1, -2), pine, driver='gelsd').solution
+                dz = rsqrtQ @ (aapl - pine)
+                newzhat[:] = zhats + dz
+                newlam[:] = lams + dlam[:, :nineq, 0]
+                newnu[:] = nus + dlam[:, nineq:, 0]
+            else:
+                for i in range(0, nBatch, chunk_size):
+                    if chunk_size > 1:
+                        size = min(chunk_size, nBatch - i)
+                        i = slice(i, i + size)
+                        _, zhati, nui, _, _ = forward_batch_np(
+                            *[x.cpu().numpy() if x is not None else None
+                              for x in (Q[i], newp[i, :, 0], None, None, G_active[i], h_active[i, :, 0])],
+                            solver=solver, solver_opts=solver_opts)
+                    else:
+                        _, zhati, nui, _, _ = forward_single_np_eq_cst(
+                            *[x.cpu().numpy() if x is not None else None
+                              for x in (Q[i], newp[i, :, 0], None, None, G_active[i], h_active[i, :, 0])])
 
-                newzhat[i, :, 0] = torch.Tensor(zhati)
-                newlam[i] = torch.Tensor(nui[..., :nineq])
-                newnu[i] = torch.Tensor(nui[..., nineq:])
+                    newzhat[i, :, 0] = torch.Tensor(zhati)
+                    newlam[i] = torch.Tensor(nui[..., :nineq])
+                    newnu[i] = torch.Tensor(nui[..., nineq:])
 
             start_time = time.time()
             with torch.enable_grad():

@@ -86,7 +86,7 @@ def test_ffoqp_equality(eps_grid):
         'ffoqp': lambda solver, solver_opts:
           ffoqp.ffoqp(lamb=100, solver=solver, solver_opts=solver_opts),
         'ffoqp_eq_cst': lambda solver, solver_opts:
-          ffoqp_eq_cst.ffoqp(alpha=100, solver=solver, solver_opts=solver_opts),
+          ffoqp_eq_cst.ffoqp(alpha=1, solver=solver, solver_opts=solver_opts),
         'ffoqp_lpgd': lambda solver, solver_opts:
           ffoqp_lpgd.ffoqp(alpha=100, solver=solver, solver_opts=solver_opts),
     }
