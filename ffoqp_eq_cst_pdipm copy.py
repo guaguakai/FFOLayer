@@ -145,6 +145,7 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, check_Q
                 G_active = torch.cat((G_active, A), dim=1)
                 h_active = torch.cat((h_active, b.unsqueeze(-1)), dim=1)
 
+            # TODO: lack of delta_directions
             newzhat, new_nu_both = solve_kkt_batched(Q, newp.squeeze(-1), G_active, h_active.squeeze(-1))
             # Lq, Qq = torch.linalg.eigh(Q)
             # rsqrtQ = Qq @ torch.diag_embed(torch.rsqrt(Lq)) @ Qq.transpose(-1, -2)

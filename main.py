@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 
 import ffoqp
-import ffoqp_eq_cst
+import ffoqp_eq_cst_2 as ffoqp_eq_cst
 import ffoqp_eq_cst_parallelize
 import ffoqp_eq_cst_pdipm
 
@@ -24,13 +24,13 @@ from data import *
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--method', type=str, default='ffoqp_eq_cst_pdipm', help='ffoqp, ts, qpth, ffoqp_eq_cst_pdipm, ffoqp_eq_cst')
+    parser.add_argument('--method', type=str, default='ffoqp_eq_cst', help='ffoqp, ts, qpth, ffoqp_eq_cst_pdipm, ffoqp_eq_cst')
     parser.add_argument('--epochs', type=int, default=20, help='number of epochs')
     parser.add_argument('--seed', type=int, default=0, help='random seed')
     parser.add_argument('--eps', type=float, default=0.1, help='lambda for ffoqp')
     parser.add_argument('--lr', type=float, default=0.00001, help='learning rate')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size')
-    parser.add_argument('--ydim', type=int, default=32, help='dimension of y')
+    parser.add_argument('--ydim', type=int, default=20, help='dimension of y')
     
     args = parser.parse_args()
 
@@ -100,9 +100,9 @@ if __name__ == '__main__':
         elif method == 'ffoqp_eq_cst_pdipm':
             ffoqp_layer = ffoqp_eq_cst_pdipm.ffoqp(alpha=100)
         elif method == 'ffoqp_eq_cst':
-            ffoqp_layer = ffoqp_eq_cst.ffoqp(alpha=100, chunk_size=10)
+            ffoqp_layer = ffoqp_eq_cst.ffoqp(alpha=100, chunk_size=1)
         elif method == 'ffoqp_eq_cst_parallelize':
-            ffoqp_layer = ffoqp_eq_cst_parallelize.ffoqp(alpha=100, chunk_size=10)
+            ffoqp_layer = ffoqp_eq_cst_parallelize.ffoqp(alpha=100, chunk_size=1)
         else:
             raise ValueError('Invalid method: {}'.format(method))
 
