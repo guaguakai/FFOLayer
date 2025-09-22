@@ -27,7 +27,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--method', type=str, default='ffoqp_eq_cst', help='ffoqp, ts, qpth, ffoqp_eq_cst_pdipm, ffoqp_eq_cst ffoqp_eq_cst_schur')
     parser.add_argument('--epochs', type=int, default=20, help='number of epochs')
-    parser.add_argument('--seed', type=int, default=1, help='random seed')
+    parser.add_argument('--seed', type=int, default=3, help='random seed')
     parser.add_argument('--eps', type=float, default=0.1, help='lambda for ffoqp')
     parser.add_argument('--lr', type=float, default=0.00001, help='learning rate')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')

@@ -1,7 +1,7 @@
 
 import numpy as np
 import diffcp
-import diffcp_lpgd
+# import diffcp_lpgd
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -83,7 +83,7 @@ def forward_numpy(params_numpy, context):
     try:
         if context.solve_and_derivative:
             if context.lpgd:
-                xs, _, _, _, DT_batch = diffcp_lpgd.solve_and_derivative_batch(
+                xs, _, _, _, DT_batch = diffcp.solve_and_derivative_batch(
                     As, bs, cs, cone_dicts, mode='lpgd', derivative_kwargs=dict(tau=0.1, rho=0.1), **context.solver_args)
             else:
                 xs, _, _, _, DT_batch = diffcp.solve_and_derivative_batch(
@@ -92,7 +92,7 @@ def forward_numpy(params_numpy, context):
         else:
             # xs, _, _ = diffcp.solve_only_batch(
             #     As, bs, cs, cone_dicts, **context.solver_args)
-            xs, _, _ = diffcp_lpgd.solve_only_batch(
+            xs, _, _ = diffcp.solve_only_batch(
                 As, bs, cs, cone_dicts, **context.solver_args)
     except diffcp.SolverError as e:
         print(

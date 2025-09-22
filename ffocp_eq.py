@@ -217,10 +217,19 @@ def _BLOLayerFn(
                     cp.Minimize(objective),
                     constraints=equality_constraints + inequality_constraints
                 )
+                
+                # for k, param in enumerate(param_order):
+                #     print(f"Param {k} type: {type(param)}, value: {param.value if hasattr(param,'value') else None}")
 
                 # problem.solve(solver=cp.SCS)
                 problem.solve(solver=cp.GUROBI)
-
+                
+                # print("Problem status:", problem.status)
+                # if problem.status != cp.OPTIMAL:
+                #     print("GUROBI failed or problem infeasible/unbounded!")
+                #     for v_id, v in enumerate(variables):
+                #         print(f"Variable {v_id} value:", v.value)
+                
                 # sol_i = [v.value for v in variables]
                 # equality_dual_i = [
                 #     c.dual_value for c in equality_constraints
@@ -275,9 +284,9 @@ def _BLOLayerFn(
             batch_size = ctx.batch_size
 
             equality_constraints = [equality_function == 0 for equality_function in equality_functions]
-            print('sol', sol)
-            print('equality_dual', equality_dual)
-            print('inequality_dual', inequality_dual)
+            # print('sol', sol)
+            # print('equality_dual', equality_dual)
+            # print('inequality_dual', inequality_dual)
 
             sol_lagrangian = [[] for v in variables]
             grad_numpy = [[] for _ in param_order]
@@ -288,6 +297,7 @@ def _BLOLayerFn(
 
             active_mask_params = [cp.Parameter(shape=f.shape) for f in inequality_functions]
 
+            # print(f"dvar shape: length:{len(dvars)}, {[d.shape for d in dvars_numpy]}")
             vars_dvars_product = cp.sum([cp.sum(cp.multiply(dvar, v)) for dvar, v in zip(dvar_params, variables)])
             ineq_constraints_dual_product = cp.sum([cp.sum(cp.multiply(dual, ineq)) for dual, ineq in zip(inequality_dual_params, inequality_functions)])
             equality_dual_product = cp.sum([cp.sum(cp.multiply(dual, eq)) for dual, eq in zip(equality_dual_params, equality_functions)])
@@ -303,6 +313,10 @@ def _BLOLayerFn(
             ]
 
             problem = cp.Problem(cp.Minimize(new_objective), constraints=equality_constraints + active_ineq_constraints)
+            
+            #### SHING HEI ADDED
+            # new_equality_dual = [[] for c in equality_functions]
+            # new_active_dual = [[] for c in active_ineq_constraints]
 
             for i in range(batch_size):
                 for j, _ in enumerate(param_order):
@@ -329,10 +343,30 @@ def _BLOLayerFn(
                 # print('solution distance', np.linalg.norm(sol_i_lagrangian - sol_i))
                 for j, v in enumerate(variables):
                     sol_lagrangian[j].append(v.value[np.newaxis,:])
+                
+                ### SHING HEI ADDED
+                # for c_id,c in enumerate(equality_constraints):
+                #     new_equality_dual[c_id].append(c.dual_value[np.newaxis,:])
+                # for c_id,c in enumerate(active_ineq_constraints):
+                #     active_mask = np.array([a.value for a in active_mask_params])
+                #     new_active_dual[c_id].append(c.dual_value[np.newaxis,:])
+                    
+            ### SHING HEI ADDED
+            # for c_id in range(len(equality_constraints)):
+            #     new_equality_dual[c_id] = np.concatenate(new_equality_dual[c_id])
+            # for c_id in range(len(active_ineq_constraints)):
+            #     new_active_dual[c_id] = np.concatenate(new_active_dual[c_id])
 
             new_sol = [to_torch(np.concatenate(v), ctx.dtype, ctx.device) for v in sol_lagrangian]
             new_inequality_dual_torch = [to_torch(v, ctx.dtype, ctx.device) for v in inequality_dual]
             new_equality_dual_torch = [to_torch(v, ctx.dtype, ctx.device) for v in equality_dual]
+            
+            #print(f"old inequality dual: {[d[0] for d in new_inequality_dual_torch]}")
+            
+            ###### SHING HEI ADDED 
+            # new_inequality_dual_torch = [to_torch(v, ctx.dtype, ctx.device) for v in new_active_dual]
+            # new_equality_dual_torch = [to_torch(v, ctx.dtype, ctx.device) for v in new_equality_dual]
+            # print(f"active dual: {[d[0] for d in new_inequality_dual_torch]}")
 
             finite_difference_obj = objective + equality_dual_product + ineq_constraints_dual_product
 
@@ -341,7 +375,7 @@ def _BLOLayerFn(
                 provided_vars_list=[*variables, *param_order, *equality_dual_params, *inequality_dual_params]
             ).torch_expression
 
-            params_req = [p.detach().clone().requires_grad_(True) for p in params if p.requires_grad]
+            params_req = [p.detach().clone().requires_grad_(True) if p.requires_grad else p.detach().clone()for p in params]
 
             def slice_params_for_batch(params_req, batch_sizes, i):
                 """Pick p[i] if that parameter was batched; else p."""
@@ -362,6 +396,13 @@ def _BLOLayerFn(
                     new_ineq_dual_i = [d[i] for d in new_inequality_dual_torch]
                     old_eq_dual_i   = [to_torch(d[i], ctx.dtype, ctx.device) for d in equality_dual]
                     old_ineq_dual_i = [to_torch(d[i], ctx.dtype, ctx.device) for d in inequality_dual]
+                    
+                    # print(f"params: {[p.shape for p in params]}")
+                    # print(f"params_req: {[p.shape for p in params_req]}")
+                    # print(f"params_{i} shape: {[out.shape for out in params_i]}")
+                    # print(f"eq dual_{i}shape: {[d.shape for d in new_eq_dual_i]}")
+                    # print(f"ineq dual_{i} shape: {[d.shape for d in new_ineq_dual_i]}")
+                    # print(f"var_new_{i}: {[v.shape for v in vars_new_i]}")
 
                     new_val_i = _torch_exp(*vars_new_i, *params_i, *new_eq_dual_i, *new_ineq_dual_i)
                     old_val_i = _torch_exp(*vars_old_i, *params_i, *old_eq_dual_i, *old_ineq_dual_i)
@@ -377,6 +418,7 @@ def _BLOLayerFn(
             loss.backward()
 
             grads = [p.grad for p in params_req]
+            # print("!!!! ffocp_eq grads: \n", grads)
 
             # convert to torch tensors and incorporate info_backward
             # grad = [to_torch(g, ctx.dtype, ctx.device) for g in grad_numpy]
