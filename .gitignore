@@ -8,3 +8,4 @@ output/*
 **/wandb/*
 **/.pytest_cache/*
 **/results_*/*
+**/sudoku_results_*/*
