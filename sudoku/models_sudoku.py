@@ -90,7 +90,7 @@ def get_Q_from_L(self, L, eps):
     return Q
 
 class SingleOptLayerSudoku(nn.Module):
-    def __init__(self, n, learnable_parts, layer_type, Qpenalty=0.1, alpha=100, init_learnable_vals=None):
+    def __init__(self, n, learnable_parts, layer_type, Qpenalty=0.1, alpha=100, init_learnable_vals=None, dual_cutoff=1e-3):
         '''
         The architecture is {parameter - optLayer}.
         
@@ -163,7 +163,7 @@ class SingleOptLayerSudoku(nn.Module):
             problem, objective, ineq_functions, eq_functions, params, variables = setup_cvx_qp_problem(opt_var_dim=self.y_dim, num_ineq=self.num_ineq, num_eq=self.num_eq)
             
             if layer_type==FFOCP_EQ:
-                self.optlayer = BLOLayer(objective=objective, equality_functions=eq_functions, inequality_functions=ineq_functions, parameters=params, variables=variables, alpha=alpha)
+                self.optlayer = BLOLayer(objective=objective, equality_functions=eq_functions, inequality_functions=ineq_functions, parameters=params, variables=variables, alpha=alpha, dual_cutoff=dual_cutoff)
             elif layer_type==CVXPY_LAYER:
                 self.optlayer = CvxpyLayer(problem, parameters=params, variables=variables)
             elif layer_type==LPGD:

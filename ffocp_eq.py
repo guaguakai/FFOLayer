@@ -1,9 +1,13 @@
 import time
 import cvxpy as cp
 import numpy as np
+import os
 
 import torch
 from cvxtorch import TorchExpression
+
+n_threads = os.cpu_count()
+
 
 class BLOLayer(torch.nn.Module):
     """A differentiable convex optimization layer
@@ -42,7 +46,7 @@ class BLOLayer(torch.nn.Module):
         ```
     """
 
-    def __init__(self, objective, equality_functions, inequality_functions, parameters, variables, alpha):
+    def __init__(self, objective, equality_functions, inequality_functions, parameters, variables, alpha, dual_cutoff):
         """Construct a BLOLayer
 
         Args:
@@ -66,6 +70,7 @@ class BLOLayer(torch.nn.Module):
         self.param_order = parameters
         self.variables = variables
         self.alpha = alpha
+        self.dual_cutoff = dual_cutoff
 
     def forward(self, *params, solver_args={}):
         """Solve problem (or a batch of problems) corresponding to `params`
@@ -91,6 +96,7 @@ class BLOLayer(torch.nn.Module):
             param_order=self.param_order,
             variables=self.variables,
             alpha=self.alpha,
+            dual_cutoff=self.dual_cutoff,
             info=info,
         )
         sol = f(*params)
@@ -115,6 +121,7 @@ def _BLOLayerFn(
         param_order,
         variables,
         alpha,
+        dual_cutoff,
         info):
     class _BLOLayerFnFn(torch.autograd.Function):
         @staticmethod
@@ -201,6 +208,11 @@ def _BLOLayerFn(
             # print('equality_constraints', equality_constraints)
             # print('inequality_constraints', inequality_constraints)
 
+            problem = cp.Problem(
+                cp.Minimize(objective),
+                constraints=equality_constraints + inequality_constraints
+            )
+
             for i in range(ctx.batch_size):
                 if ctx.batch:
                     # select the i-th batch element for each parameter
@@ -213,16 +225,11 @@ def _BLOLayerFn(
                 for p, q in zip(params_numpy_i, param_order):
                     q.value = p
 
-                problem = cp.Problem(
-                    cp.Minimize(objective),
-                    constraints=equality_constraints + inequality_constraints
-                )
-                
                 # for k, param in enumerate(param_order):
                 #     print(f"Param {k} type: {type(param)}, value: {param.value if hasattr(param,'value') else None}")
 
                 # problem.solve(solver=cp.SCS)
-                problem.solve(solver=cp.GUROBI)
+                problem.solve(solver=cp.GUROBI, **{"Threads": n_threads, "OutputFlag": 0})
                 
                 # print("Problem status:", problem.status)
                 # if problem.status != cp.OPTIMAL:
@@ -311,7 +318,10 @@ def _BLOLayerFn(
                 cp.multiply(active_mask_params[j], inequality_functions[j]) == 0
                 for j in range(len(inequality_functions))
             ]
-
+            active_ineq_constraints_dual_product = cp.sum([
+                cp.sum(cp.multiply(dual, cp.multiply(active_mask_params[j], inequality_functions[j])))
+                for j, dual in enumerate(inequality_dual_params)
+            ])
             problem = cp.Problem(cp.Minimize(new_objective), constraints=equality_constraints + active_ineq_constraints)
             
             #### SHING HEI ADDED
@@ -319,6 +329,7 @@ def _BLOLayerFn(
             new_active_dual = [[] for c in active_ineq_constraints]
 
             for i in range(batch_size):
+                # TODO: we can combine all the for loops into 1 loop
                 for j, _ in enumerate(param_order):
                     param_order[j].value = params_numpy[j][i]
 
@@ -328,12 +339,12 @@ def _BLOLayerFn(
                 for j, _ in enumerate(inequality_functions):
                     # key for bilevel algorithm: identify the active constraints and add them to the equality constraints
                     lam = inequality_dual[j][i]
-                    active_mask_params[j].value = (lam > 1e-3).astype(np.float64)
+                    active_mask_params[j].value = (lam > dual_cutoff).astype(np.float64)
 
                 for j, _ in enumerate(equality_functions):
                     equality_dual_params[j].value = equality_dual[j][i]
 
-                problem.solve(solver=cp.GUROBI)
+                problem.solve(solver=cp.GUROBI, **{"Threads": n_threads, "OutputFlag": 0})
                 # sol_i_lagrangian = np.array([v.value for v in variables])
                 # sol_i = np.array([sol[j][i] for j in range(len(variables))])
                 # print('batch index', i)
@@ -345,9 +356,13 @@ def _BLOLayerFn(
                     sol_lagrangian[j].append(v.value[np.newaxis,:])
                 
                 ### SHING HEI ADDED
-                for c_id,c in enumerate(equality_constraints):
+                for c_id, c in enumerate(equality_constraints):
+                    if c.dual_value.any() == None:
+                        print(f"equality constraint {c_id} dual value is None")
                     new_equality_dual[c_id].append(c.dual_value[np.newaxis,:])
-                for c_id,c in enumerate(active_ineq_constraints):
+                for c_id, c in enumerate(active_ineq_constraints):
+                    if c.dual_value.any() == None:
+                        print(f"active inequality constraint {c_id} dual value is None")
                     active_mask = np.array([a.value for a in active_mask_params])
                     new_active_dual[c_id].append(c.dual_value[np.newaxis,:])
                     
@@ -367,12 +382,19 @@ def _BLOLayerFn(
             new_inequality_dual_torch = [to_torch(v, ctx.dtype, ctx.device) for v in new_active_dual]
             new_equality_dual_torch = [to_torch(v, ctx.dtype, ctx.device) for v in new_equality_dual]
             # print(f"active dual: {[d[0] for d in new_inequality_dual_torch]}")
+        
+            # ZIHAO CHANGED
+            # finite_difference_obj = objective + equality_dual_product + ineq_constraints_dual_product
+            # _torch_exp = TorchExpression(
+            #     finite_difference_obj,
+            #     provided_vars_list=[*variables, *param_order, *equality_dual_params, *inequality_dual_params]
+            # ).torch_expression
 
-            finite_difference_obj = objective + equality_dual_product + ineq_constraints_dual_product
+            finite_difference_obj = objective + equality_dual_product + active_ineq_constraints_dual_product
 
             _torch_exp = TorchExpression(
                 finite_difference_obj,
-                provided_vars_list=[*variables, *param_order, *equality_dual_params, *inequality_dual_params]
+                provided_vars_list=[*variables, *param_order, *equality_dual_params, *inequality_dual_params, *active_mask_params]
             ).torch_expression
 
             params_req = [p.detach().clone().requires_grad_(True) if p.requires_grad else p.detach().clone()for p in params]
@@ -383,6 +405,14 @@ def _BLOLayerFn(
                 for p, bs in zip(params_req, ctx.batch_sizes):
                     out.append(p[i] if bs > 0 else p)
                 return out
+
+            def make_mask_torch_for_i(i):
+                mask_list = []
+                for j in range(len(inequality_functions)):
+                    lam_ji = inequality_dual[j][i]
+                    mask_np = (lam_ji > dual_cutoff).astype(np.float64)
+                    mask_list.append(to_torch(mask_np, ctx.dtype, ctx.device))
+                return mask_list
 
             loss = 0.0
             with torch.enable_grad():
@@ -404,8 +434,10 @@ def _BLOLayerFn(
                     # print(f"ineq dual_{i} shape: {[d.shape for d in new_ineq_dual_i]}")
                     # print(f"var_new_{i}: {[v.shape for v in vars_new_i]}")
 
-                    new_val_i = _torch_exp(*vars_new_i, *params_i, *new_eq_dual_i, *new_ineq_dual_i)
-                    old_val_i = _torch_exp(*vars_old_i, *params_i, *old_eq_dual_i, *old_ineq_dual_i)
+                    mask_list = make_mask_torch_for_i(i)
+
+                    new_val_i = _torch_exp(*vars_new_i, *params_i, *new_eq_dual_i, *new_ineq_dual_i, *mask_list)
+                    old_val_i = _torch_exp(*vars_old_i, *params_i, *old_eq_dual_i, *old_ineq_dual_i, *mask_list)
                     
                     loss += new_val_i - old_val_i
 

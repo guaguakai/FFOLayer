@@ -30,7 +30,7 @@ def setup_cvx_qp_problem(opt_var_dim, num_ineq, num_eq):
     ### Q_cp is the square root of the actual Q in the QP, assuming Q_cp is symmetric
     objective_fn = 0.5 * cp.sum_squares(Q_cp @ y_cp) + p_cp.T @ y_cp
     
-    ### objective_fn = 0.5 * cp.quad_form(y_cp, Q_cp) + p_cp.T @ y_cp
+    # objective_fn = 0.5 * cp.quad_form(y_cp, Q_cp) + p_cp.T @ y_cp
     
     ### Construct xx^T and form quadratic expression
     # X = cp.reshape(y_cp, (opt_var_dim,1)) @ cp.reshape(y_cp, (1,opt_var_dim))

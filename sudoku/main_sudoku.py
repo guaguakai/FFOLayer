@@ -21,7 +21,8 @@ def train_test_loop(args, experiment_dir, n):
     
     board_side_len = n**2
     
-    device = torch.device('cpu') #torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # device = torch.device('cpu') #torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:3' if torch.cuda.is_available() else 'cpu')
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
@@ -61,7 +62,10 @@ def train_test_loop(args, experiment_dir, n):
     print(f"Training samples: {len(train_dataset)}, Test samples: {len(test_dataset)}")
     
     ###############################################
-    model = SingleOptLayerSudoku(n, learnable_parts=["eq"], layer_type=method, Qpenalty=0.1, alpha=1000)
+    alpha = args.alpha
+    dual_cutoff = args.dual_cutoff
+    model = SingleOptLayerSudoku(n, learnable_parts=["eq"], layer_type=method, Qpenalty=0.1, alpha=alpha, dual_cutoff=dual_cutoff)
+    model = model.to(device)
     
     # if method==FFOCP_EQ:
     #     model = BLOSudokuLearnA(n, Qpenalty, alpha=100).to(device)
@@ -128,6 +132,7 @@ def train_test_loop(args, experiment_dir, n):
                 optimizer.zero_grad()
 
                 train_loss_list.append(loss.item())
+                print(f"train loss: {loss.item()}")
 
             if epoch%5==0 or epoch==num_epochs-1:
                     torch.save(model.state_dict(), os.path.join(directory, f"model_epoch{epoch}.pt"))
@@ -199,8 +204,11 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=18, help='number of epochs')
     parser.add_argument('--seed', type=int, default=1, help='random seed')
     parser.add_argument('--lr', type=float, default=0.1, help='learning rate')
-    parser.add_argument('--batch_size', type=int, default=150, help='batch size')
+    parser.add_argument('--batch_size', type=int, default=32, help='batch size')
     parser.add_argument('--n', type=int, default=2, help='n^2 is the board side length')
+
+    parser.add_argument('--alpha', type=float, default=100, help='alpha')
+    parser.add_argument('--dual_cutoff', type=float, default=1e-3, help='dual cutoff')
     
     args = parser.parse_args()
     
