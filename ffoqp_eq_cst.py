@@ -207,11 +207,17 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, check_Q
                 objectives = (dzhat.transpose(-1,-2) @ Q_torch @ zhats + p_torch.unsqueeze(1) @ dzhat).squeeze(-1,-2)
                 violations = G_torch @ zhats - h_torch.unsqueeze(-1)
 
-                ineq_penalties = dnu[:, :nineq].unsqueeze(1) @ (violations * active_constraints)
+                ineq_penalties = (
+                    dnu[:, :nineq].unsqueeze(1) @ (violations * active_constraints)
+                    + lams.unsqueeze(1) @ G_torch @ dzhat
+                )
 
                 if neq > 0:
                     eq_violations = A_torch @ zhats - b_torch.unsqueeze(-1)
-                    eq_penalties = dnu[:, nineq:].unsqueeze(1) @ eq_violations
+                    eq_penalties = (
+                        dnu[:, nineq:].unsqueeze(1) @ eq_violations
+                        + nus.unsqueeze(1) @ A_torch @ dzhat
+                    )
                 else:
                     eq_penalties = 0
 

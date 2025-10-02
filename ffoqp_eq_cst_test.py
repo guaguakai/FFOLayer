@@ -1,6 +1,6 @@
 # import ffodo
-# import ffoqp_eq_cst
-import ffoqp_eq_cst_parallelize as ffoqp_eq_cst
+import ffoqp_eq_cst
+# import ffoqp_eq_cst_parallelize as ffoqp_eq_cst
 import torch
 import numpy as np
 import unittest
@@ -46,13 +46,13 @@ class TestFFOQP(unittest.TestCase):
         n_ineq_constraints = 50
         Q = torch.eye(n)
         q = torch.rand(n)
-        q.requires_grad_(True)
         A = torch.empty(n_eq_constraints, n)
         b = torch.empty(n_eq_constraints)
         G = torch.randn(n_ineq_constraints, n)
         h = torch.randn(n_ineq_constraints)
+        G.requires_grad_(True)
 
-        optimizer = torch.optim.SGD([q], lr=0.1)
+        optimizer = torch.optim.SGD([G], lr=0.1)
 
         # Create an instance of the FFOQP class
         # solver = QPSolvers.PDIPM_BATCHED
@@ -67,7 +67,7 @@ class TestFFOQP(unittest.TestCase):
         print('backpropagating qp...')
         loss = torch.sum(z)
         loss.backward(retain_graph=True)
-        ffoqp_grad = q.grad.clone().detach()
+        ffoqp_grad = G.grad.clone().detach()
         optimizer.zero_grad()
 
         # Create an instance of the CVXPY layer
@@ -99,7 +99,7 @@ class TestFFOQP(unittest.TestCase):
         loss = torch.sum(z_sol)
         loss.backward()
         
-        cvxpylayer_grad = q.grad.clone().detach()
+        cvxpylayer_grad = G.grad.clone().detach()
         optimizer.zero_grad()
         print('ffoqp_grad', ffoqp_grad)
         print('cvxpylayer_grad', cvxpylayer_grad)
@@ -114,13 +114,13 @@ class TestFFOQP(unittest.TestCase):
         n_ineq_constraints = 50
         Q = torch.eye(n)
         q = torch.rand(n)
-        q.requires_grad_(True)
         A = torch.randn(n_eq_constraints, n)
         b = torch.randn(n_eq_constraints)
         G = torch.randn(n_ineq_constraints, n)
         h = torch.randn(n_ineq_constraints)
+        A.requires_grad_(True)
 
-        optimizer = torch.optim.SGD([q], lr=0.1)
+        optimizer = torch.optim.SGD([A], lr=0.1)
 
         # Create an instance of the FFOQP class
         # solver = QPSolvers.PDIPM_BATCHED
@@ -135,7 +135,7 @@ class TestFFOQP(unittest.TestCase):
         print('backpropagating qp...')
         loss = torch.sum(z)
         loss.backward(retain_graph=True)
-        ffoqp_grad = q.grad.clone().detach()
+        ffoqp_grad = A.grad.clone().detach()
         optimizer.zero_grad()
 
         # Create an instance of the CVXPY layer
@@ -165,7 +165,7 @@ class TestFFOQP(unittest.TestCase):
         loss = torch.sum(z_sol)
         loss.backward()
         
-        cvxpylayer_grad = q.grad.clone().detach()
+        cvxpylayer_grad = A.grad.clone().detach()
         optimizer.zero_grad()
         print('ffoqp_grad', ffoqp_grad)
         print('cvxpylayer_grad', cvxpylayer_grad)
