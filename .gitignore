@@ -9,3 +9,4 @@ output/*
 **/.pytest_cache/*
 **/results_*/*
 **/sudoku_results_*/*
+*copy*

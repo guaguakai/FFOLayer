@@ -64,7 +64,7 @@ def train_test_loop(args, experiment_dir, n):
     ###############################################
     alpha = args.alpha
     dual_cutoff = args.dual_cutoff
-    model = SingleOptLayerSudoku(n, learnable_parts=["eq"], layer_type=method, Qpenalty=0.1, alpha=alpha, dual_cutoff=dual_cutoff)
+    model = SingleOptLayerSudoku(n, learnable_parts=['eq'], layer_type=method, Qpenalty=0.1, alpha=alpha, dual_cutoff=dual_cutoff)
     model = model.to(device)
     
     # if method==FFOCP_EQ:
@@ -200,8 +200,8 @@ def train_test_loop(args, experiment_dir, n):
  
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--method', type=str, default='ffocp_eq', help='ffocp_eq, lpgd, qpth, cvxpylayer')
-    parser.add_argument('--epochs', type=int, default=18, help='number of epochs')
+    parser.add_argument('--method', type=str, default='lpgd', help='ffocp_eq, lpgd, qpth, cvxpylayer')
+    parser.add_argument('--epochs', type=int, default=10, help='number of epochs')
     parser.add_argument('--seed', type=int, default=1, help='random seed')
     parser.add_argument('--lr', type=float, default=0.1, help='learning rate')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')

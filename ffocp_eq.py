@@ -291,12 +291,6 @@ def _BLOLayerFn(
             batch_size = ctx.batch_size
 
             equality_constraints = [equality_function == 0 for equality_function in equality_functions]
-            # print('sol', sol)
-            # print('equality_dual', equality_dual)
-            # print('inequality_dual', inequality_dual)
-
-            sol_lagrangian = [[] for v in variables]
-            grad_numpy = [[] for _ in param_order]
 
             dvar_params = [cp.Parameter(shape=v.shape) for v in variables]
             inequality_dual_params = [cp.Parameter(shape=v.shape) for v in inequality_functions]
@@ -304,31 +298,22 @@ def _BLOLayerFn(
 
             active_mask_params = [cp.Parameter(shape=f.shape) for f in inequality_functions]
 
-            # print(f"dvar shape: length:{len(dvars)}, {[d.shape for d in dvars_numpy]}")
             vars_dvars_product = cp.sum([cp.sum(cp.multiply(dvar, v)) for dvar, v in zip(dvar_params, variables)])
-            ineq_constraints_dual_product = cp.sum([cp.sum(cp.multiply(dual, ineq)) for dual, ineq in zip(inequality_dual_params, inequality_functions)])
-            equality_dual_product = cp.sum([cp.sum(cp.multiply(dual, eq)) for dual, eq in zip(equality_dual_params, equality_functions)])
+            eq_dual_product = cp.sum([cp.sum(cp.multiply(dual, eq)) for dual, eq in zip(equality_dual_params, equality_functions)])
+            ineq_dual_product = cp.sum([cp.sum(cp.multiply(dual, ineq)) for dual, ineq in zip(inequality_dual_params, inequality_functions)])            
 
-            # should only contain the equality constraints
-            new_objective = 1 / alpha * cp.sum(vars_dvars_product) + objective
+            # should be: new_objective = 1 / alpha * cp.sum(vars_dvars_product) + objective + eq_dual_product + ineq_dual_product
+            # but eq_dual_product is 0
+            new_objective = 1 / alpha * cp.sum(vars_dvars_product) + objective + ineq_dual_product
 
-            # “Activate” only those inequality entries where mask==1:
-            # mask * ineq == 0  -> forces ineq==0 when mask=1; becomes 0==0 when mask=0.
-
-            # inequality_functions should be original y. 
             active_ineq_constraints = [
                 cp.multiply(active_mask_params[j], inequality_functions[j]) == 0
                 for j in range(len(inequality_functions))
             ]
-
-            active_ineq_constraints_dual_product = cp.sum([
-                cp.sum(cp.multiply(dual, cp.multiply(active_mask_params[j], inequality_functions[j])))
-                for j, dual in enumerate(inequality_dual_params)
-            ])
             
             problem = cp.Problem(cp.Minimize(new_objective), constraints=equality_constraints + active_ineq_constraints)
             
-            #### SHING HEI ADDED
+            new_sol_lagrangian = [[] for v in variables]
             new_equality_dual = [[] for c in equality_functions]
             new_active_dual = [[] for c in active_ineq_constraints]
 
@@ -343,12 +328,15 @@ def _BLOLayerFn(
                 for j, _ in enumerate(inequality_functions):
                     # key for bilevel algorithm: identify the active constraints and add them to the equality constraints
                     lam = inequality_dual[j][i]
+                    inequality_dual_params[j].value = lam
                     active_mask_params[j].value = (lam > dual_cutoff).astype(np.float64)
 
                 for j, _ in enumerate(equality_functions):
                     equality_dual_params[j].value = equality_dual[j][i]
 
                 problem.solve(solver=cp.GUROBI, **{"Threads": n_threads, "OutputFlag": 0})
+                # problem.solve(solver=cp.OSQP, eps_abs=1e-2, eps_rel=1e-2, warm_start=True, verbose=False)
+                # import pdb; pdb.set_trace()
                 # sol_i_lagrangian = np.array([v.value for v in variables])
                 # sol_i = np.array([sol[j][i] for j in range(len(variables))])
                 # print('batch index', i)
@@ -356,10 +344,15 @@ def _BLOLayerFn(
                 # print('forward solve solution', sol_i)
                 # print('backward solve solution', sol_i_lagrangian)
                 # print('solution distance', np.linalg.norm(sol_i_lagrangian - sol_i))
-                for j, v in enumerate(variables):
-                    sol_lagrangian[j].append(v.value[np.newaxis,:])
-                
-                ### SHING HEI ADDED
+                try:
+                    for j, v in enumerate(variables):
+                        new_sol_lagrangian[j].append(v.value[np.newaxis,:])
+                except:
+                    print("GUROBI failed, using OSQP")
+                    problem.solve(solver=cp.OSQP, eps_abs=1e-4, eps_rel=1e-4, warm_start=True, verbose=False)
+                    for j, v in enumerate(variables):
+                        new_sol_lagrangian[j].append(v.value[np.newaxis,:])
+                    
                 for c_id, c in enumerate(equality_constraints):
                     if c.dual_value.any() == None:
                         print(f"equality constraint {c_id} dual value is None")
@@ -369,44 +362,41 @@ def _BLOLayerFn(
                         print(f"active inequality constraint {c_id} dual value is None")
                     active_mask = np.array([a.value for a in active_mask_params])
                     new_active_dual[c_id].append(c.dual_value[np.newaxis,:])
-                    
-            ### SHING HEI ADDED
+            
             for c_id in range(len(equality_constraints)):
                 new_equality_dual[c_id] = np.concatenate(new_equality_dual[c_id])
             for c_id in range(len(active_ineq_constraints)):
                 new_active_dual[c_id] = np.concatenate(new_active_dual[c_id])
 
-            new_sol = [to_torch(np.concatenate(v), ctx.dtype, ctx.device) for v in sol_lagrangian]
-            new_inequality_dual_torch = [to_torch(v, ctx.dtype, ctx.device) for v in inequality_dual]
-            new_equality_dual_torch = [to_torch(v, ctx.dtype, ctx.device) for v in equality_dual]
-            
-            #print(f"old inequality dual: {[d[0] for d in new_inequality_dual_torch]}")
-            
-            ###### SHING HEI ADDED 
+            new_sol = [to_torch(np.concatenate(v), ctx.dtype, ctx.device) for v in new_sol_lagrangian]
             new_inequality_dual_torch = [to_torch(v, ctx.dtype, ctx.device) for v in new_active_dual]
             new_equality_dual_torch = [to_torch(v, ctx.dtype, ctx.device) for v in new_equality_dual]
-            # print(f"active dual: {[d[0] for d in new_inequality_dual_torch]}")
+
+            # import pdb; pdb.set_trace()
         
             # ZIHAO CHANGED
-            # finite_difference_obj = objective + equality_dual_product + ineq_constraints_dual_product
+            # finite_difference_obj = objective + eq_dual_product + ineq_dual_product
             # _torch_exp = TorchExpression(
             #     finite_difference_obj,
             #     provided_vars_list=[*variables, *param_order, *equality_dual_params, *inequality_dual_params]
             # ).torch_expression
 
-            # finite_difference_obj = objective + equality_dual_product + active_ineq_constraints_dual_product
+            # finite_difference_obj = objective + eq_dual_product + active_ineq_dual_product
 
             # _torch_exp = TorchExpression(
             #     finite_difference_obj,
             #     provided_vars_list=[*variables, *param_order, *equality_dual_params, *inequality_dual_params, *active_mask_params]
             # ).torch_expression
 
-            g_cp_expr = objective
-            g_torch = TorchExpression(
-                g_cp_expr,
-                provided_vars_list=[*variables, *param_order]
+            # compute \tilde{g}(x,y) = g(x,y) + (\lambda^*)^\top h(x,y) + (\nu^*)^\top e(x,y)
+            # g_tilde_expr = objective + eq_dual_product + ineq_dual_product
+            g_tilde_expr = objective + eq_dual_product + ineq_dual_product
+            g_tilde_torch = TorchExpression(
+                g_tilde_expr,
+                provided_vars_list=[*variables, *param_order, *equality_dual_params, *inequality_dual_params]
             ).torch_expression
 
+            # compute h_tilde separately for equality and active inequality constraints
             ineq_torch_list = [
                 TorchExpression(
                     ineq_expr,
@@ -415,7 +405,7 @@ def _BLOLayerFn(
                 for ineq_expr in inequality_functions
             ]
 
-            equality_torch_list = [
+            eq_torch_list = [
                 TorchExpression(
                     eq_expr,
                     provided_vars_list=[*variables, *param_order]
@@ -462,22 +452,23 @@ def _BLOLayerFn(
 
                     mask_list = make_mask_torch_for_i(i)
 
-                    g_new = g_torch(*vars_new_i, *params_i)
-                    g_old = g_torch(*vars_old_i, *params_i)
-                    ineq_old_vals = [h_fn(*vars_old_i, *params_i) for h_fn in ineq_torch_list]
-                    eq_old_vals = [h_fn(*vars_old_i, *params_i) for h_fn in equality_torch_list]
-                    mask_list = [m.to(dtype=ctx.dtype, device=ctx.device) for m in mask_list]
+                    # g_new = g_tilde_torch(*vars_new_i, *params_i)
+                    # g_old = g_tilde_torch(*vars_old_i, *params_i)
 
-                    ineq_active = [m * h for m, h in zip(mask_list, ineq_old_vals)]
+                    # ineq_old_vals = [h_fn(*vars_old_i, *params_i) for h_fn in ineq_torch_list]
+                    # eq_old_vals = [h_fn(*vars_old_i, *params_i) for h_fn in eq_torch_list]
 
-                    _diff_ineq = sum(((new_ineq_dual_i[j] - old_ineq_dual_i[j]) * ineq_active[j]).sum() for j in range(len(ineq_active)))
-                    _diff_eq = sum(((new_eq_dual_i[j] - old_eq_dual_i[j]) * eq_old_vals[j]).sum() for j in range(len(eq_old_vals)))
+                    # mask_list = [m.to(dtype=ctx.dtype, device=ctx.device) for m in mask_list]
+                    # ineq_active = [m * h for m, h in zip(mask_list, ineq_old_vals)]
 
-                    loss += g_new - g_old + _diff_ineq + _diff_eq
+                    # _diff_ineq = sum(((new_ineq_dual_i[j] - old_ineq_dual_i[j]) * ineq_active[j]).sum() for j in range(len(ineq_active)))
+                    # _diff_eq = sum(((new_eq_dual_i[j] - old_eq_dual_i[j]) * eq_old_vals[j]).sum() for j in range(len(eq_old_vals)))
 
-                    # new_val_i = _torch_exp(*vars_new_i, *params_i, *new_eq_dual_i, *new_ineq_dual_i, *mask_list)
-                    # old_val_i = _torch_exp(*vars_old_i, *params_i, *old_eq_dual_i, *old_ineq_dual_i, *mask_list)
-                    # loss +=  new_val_i - old_val_i
+                    # loss += g_new - g_old + _diff_ineq + _diff_eq
+
+                    new_val_i = g_tilde_torch(*vars_new_i, *params_i, *new_eq_dual_i, *new_ineq_dual_i)
+                    old_val_i = g_tilde_torch(*vars_old_i, *params_i, *old_eq_dual_i, *old_ineq_dual_i)
+                    loss +=  new_val_i - old_val_i
 
                 loss = alpha * loss
 

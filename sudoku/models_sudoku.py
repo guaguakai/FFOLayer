@@ -47,7 +47,7 @@ def get_default_sudoku_params(n, Qpenalty=0.1, get_equality=True):
         
         return {"Q":Q, "G":G, "h":h, "A":A, "b":b}
         
-    return {"Q":Q, "G":G, "h":h}
+    return {"Q":Q, "G":G, "h":h, "b":b}
 
 def get_feasible_b(A, z0):
     '''
@@ -138,10 +138,15 @@ class SingleOptLayerSudoku(nn.Module):
                 self.z0_a = Parameter(init_learnable_vals["z0_a"])
             else:
                 self.A = Parameter(torch.rand((self.num_eq, self.y_dim)).double())
-                self.z0_a = Parameter(torch.rand((self.y_dim,)).double())
+                # ZIHAO CHANGE: initialize z0_a to 0
+                self.z0_a = Parameter(torch.zeros((self.y_dim,)).double())
         else:
-            for name in ["A", "b"]:
-                self.register_buffer(name, param_vals[name])
+            _A = torch.zeros(self.num_eq, self.y_dim)
+            _idx = torch.arange(self.num_eq)
+            _A[_idx, _idx] = 1.0
+            self.A = Parameter(_A.double())
+            self.register_buffer("b", param_vals["b"])
+
             
         if self.ineq_learnable:
             if init_learnable_vals is not None:
@@ -149,9 +154,9 @@ class SingleOptLayerSudoku(nn.Module):
                 self.z0_g = Parameter(init_learnable_vals["z0_g"])
                 self.log_s0 = Parameter((init_learnable_vals["log_s0"]))
             else:
-                self.G = Parameter(torch.rand((self.num_eq, self.y_dim)).double())
-                self.z0_g = Parameter(torch.rand((self.y_dim,)).double())
-                self.log_s0 = Parameter(torch.rand((self.y_dim,)).double())
+                self.G = Parameter(torch.rand((self.num_ineq, self.y_dim)).double())
+                self.z0_g = Parameter(torch.zeros((self.y_dim,)).double())
+                self.log_s0 = Parameter(torch.rand((self.num_ineq,)).double())
         else:
             for name in ["G", "h"]:
                 self.register_buffer(name, param_vals[name])
@@ -173,9 +178,6 @@ class SingleOptLayerSudoku(nn.Module):
                 self.optlayer = QPFunction(verbose=-1)
             elif self.layer_type==FFOQP_EQ:
                 self.optlayer = ffoqpLayer(alpha=alpha)
-            
-            
-        
         
     def forward(self, x):
         puzzle_shape = x.shape
