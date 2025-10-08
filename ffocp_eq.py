@@ -302,6 +302,7 @@ def _BLOLayerFn(
             new_sol_lagrangian = [[] for v in variables]
             new_equality_dual = [[] for c in equality_functions]
             new_active_dual = [[] for c in active_ineq_constraints]
+            sol_diffs = []
 
             for i in range(batch_size):
                 # TODO: we can combine all the for loops into 1 loop
@@ -324,12 +325,18 @@ def _BLOLayerFn(
                 try:
                     for j, v in enumerate(variables):
                         new_sol_lagrangian[j].append(v.value[np.newaxis,:])
+                        sol_diff = np.linalg.norm(sol[j][i] - v.value)
+                        # print("old sol vs new sol norm diff: ", sol_diff)
+                        sol_diffs.append(sol_diff)
                 except:
                     import pdb; pdb.set_trace()
                     print("GUROBI failed, using OSQP")
                     problem.solve(solver=cp.OSQP, eps_abs=1e-4, eps_rel=1e-4, warm_start=True, verbose=False)
                     for j, v in enumerate(variables):
                         new_sol_lagrangian[j].append(v.value[np.newaxis,:])
+                        sol_diff = np.linalg.norm(sol[j][i] - v.value)
+                        # print("old sol vs new sol norm diff: ", sol_diff)
+                        sol_diffs.append(sol_diff)
                     
                 for c_id, c in enumerate(equality_constraints):
                     if c.dual_value.any() == None:
@@ -340,6 +347,8 @@ def _BLOLayerFn(
                         print(f"active inequality constraint {c_id} dual value is None")
                     active_mask = np.array([a.value for a in active_mask_params])
                     new_active_dual[c_id].append(c.dual_value[np.newaxis,:])
+            
+            print('--- sol_diff mean: ', np.mean(np.array(sol_diffs)), 'max: ', np.max(np.array(sol_diffs)), 'min: ', np.min(np.array(sol_diffs)))
             
             for c_id in range(len(equality_constraints)):
                 new_equality_dual[c_id] = np.concatenate(new_equality_dual[c_id])

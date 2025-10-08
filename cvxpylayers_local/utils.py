@@ -84,7 +84,7 @@ def forward_numpy(params_numpy, context):
         if context.solve_and_derivative:
             if context.lpgd:
                 xs, _, _, _, DT_batch = diffcp.solve_and_derivative_batch(
-                    As, bs, cs, cone_dicts, mode='lpgd', derivative_kwargs=dict(tau=0.1, rho=0.1), **context.solver_args)
+                    As, bs, cs, cone_dicts, mode='lpgd', derivative_kwargs=dict(tau=1e-4, rho=0.1), **context.solver_args)
             else:
                 xs, _, _, _, DT_batch = diffcp.solve_and_derivative_batch(
                     As, bs, cs, cone_dicts, **context.solver_args)

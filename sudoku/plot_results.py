@@ -5,15 +5,19 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 TASK = "sudoku"
-batch_size = 150
-BASE_DIR = f"{TASK}_results_{batch_size}"
+batch_size = 32
+BASE_DIR = f"../{TASK}_results_{batch_size}"
 PLOT_PATH=os.path.join(BASE_DIR, "figures")
 os.makedirs(PLOT_PATH, exist_ok=True)
 
+# METHODS = [
+#     "cvxpylayer",
+#     "ffoqp_eq",
+#     "ffocp_eq",
+#     "lpgd"
+# ]
+
 METHODS = [
-    "cvxpylayer",
-    "ffoqp_eq",
-    "ffocp_eq",
     "lpgd"
 ]
 

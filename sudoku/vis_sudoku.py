@@ -14,8 +14,8 @@ if __name__=="__main__":
     board_side_len = n**2
     Qpenalty = 0.1
     batch_size = 1
-    method = "ffocp_eq"
-    weight_path = f"./sudoku_results_150/{method}/model_epoch10.pt"
+    method = "lpgd"
+    weight_path = f"../sudoku_results_32/{method}_per_5_model/model_epoch0.pt"
     
     device = torch.device('cpu') #torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -62,6 +62,7 @@ if __name__=="__main__":
         print(x.shape)
         
         pred = model(x)
+        print("pred logit: ", pred)
         
         print(f"pred error: {computeErr(pred)}")
         print(f"GT error: {computeErr(y)}")

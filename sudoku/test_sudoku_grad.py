@@ -23,9 +23,9 @@ if __name__ == '__main__':
     Qpenalty = 0.1
     
     ## 
-    main_model_name = "qpth"  #### the model you want to test must be the first one
-    main_model_checkpoint = f"sudoku_results_150/{main_model_name}"
-    main_checkpoint_epoch = 0
+    main_model_name = "lpgd"  #### the model you want to test must be the first one
+    main_model_checkpoint = f"../sudoku_results_32/{main_model_name}"
+    main_checkpoint_epoch = 2
     
     models_names = [main_model_name, "ffocp_eq", "ffoqp_eq", "lpgd"] #### the model you want to test must be the first one
     
@@ -147,6 +147,7 @@ if __name__ == '__main__':
             optimizer.zero_grad()
         break
 
+    print(models_names)
     print('Forward time {}, \nbackward time {}'.format(forward_time, backward_time))
     
     A_grad_list = [torch.mean(torch.stack(x, dim=0),dim=0).reshape(-1) for x in A_grad_list]

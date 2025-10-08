@@ -33,8 +33,8 @@ def train_test_loop(args, experiment_dir, n):
     train_data_dir_path = f"sudoku/data/{n}"
     features = torch.load(os.path.join(train_data_dir_path, "features.pt"))
     labels = torch.load(os.path.join(train_data_dir_path, "labels.pt"))
-    features = torch.tensor(features, dtype=torch.float32).to(device)[:]
-    labels   = torch.tensor(labels, dtype=torch.float32).to(device)[:]
+    features = torch.tensor(features, dtype=torch.float32).to(device)[:1000]
+    labels   = torch.tensor(labels, dtype=torch.float32).to(device)[:1000]
     print(features.shape)
     print(labels.shape)
     #assert(1==0)
@@ -134,22 +134,26 @@ def train_test_loop(args, experiment_dir, n):
                 train_loss_list.append(loss.item())
                 print(f"train loss: {loss.item()}")
 
-            if epoch%1==0 or epoch==num_epochs-1:
+            if epoch%5==0 or epoch==num_epochs-1:
                     torch.save(model.state_dict(), os.path.join(directory, f"model_epoch{epoch}.pt"))
             print('Forward time {}, backward time {}'.format(forward_time, backward_time))
 
             model.eval()
             with torch.no_grad():
                 for i, (x, y) in enumerate(test_loader):
-                    x = x.to(device)
-                    y = y.to(device)
+                    # x = x.to(device)
+                    # y = y.to(device)
                     
-                    pred = model(x)
-                    loss = loss_fn(pred, y)
+                    # pred = model(x)
+                    # loss = loss_fn(pred, y)
                     
-                    test_err += computeErr(pred)
+                    # test_err += computeErr(pred)
 
-                    test_loss_list.append(loss.item())
+                    # test_loss_list.append(loss.item())
+                    
+                    test_err += 0
+
+                    test_loss_list.append(0)
 
             train_loss = np.mean(train_loss_list)
             test_loss = np.mean(test_loss_list)
@@ -201,18 +205,18 @@ def train_test_loop(args, experiment_dir, n):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--method', type=str, default='ffocp_eq', help='ffocp_eq, lpgd, qpth, cvxpylayer')
-    parser.add_argument('--epochs', type=int, default=10, help='number of epochs')
+    parser.add_argument('--epochs', type=int, default=1, help='number of epochs')
     parser.add_argument('--seed', type=int, default=1, help='random seed')
     parser.add_argument('--lr', type=float, default=0.1, help='learning rate')
-    parser.add_argument('--batch_size', type=int, default=32, help='batch size')
-    parser.add_argument('--n', type=int, default=2, help='n^2 is the board side length')
+    parser.add_argument('--batch_size', type=int, default=1, help='batch size')
+    parser.add_argument('--n', type=int, default=3, help='n^2 is the board side length')
 
     parser.add_argument('--alpha', type=float, default=100, help='alpha')
     parser.add_argument('--dual_cutoff', type=float, default=1e-3, help='dual cutoff')
     
     args = parser.parse_args()
     
-    experiment_dir = '../sudoku_results_{}/{}/'.format(args.batch_size, args.method)
+    experiment_dir = '../time_sudoku_results_{}/{}/'.format(args.batch_size, args.method)
     os.makedirs(experiment_dir, exist_ok=True)
     central_logger = create_logger(logging_root=experiment_dir, log_name="central_failures.log")
     
