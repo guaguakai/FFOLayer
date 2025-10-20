@@ -41,7 +41,7 @@ def load_results(base_dir=BASE_DIR, methods=METHODS):
             dfs.append(df)
         
         print("method: ", m)
-        print(df)
+        # print(df)
         
     if not dfs:
         raise FileNotFoundError(f"No CSVs found under {base_dir}.")

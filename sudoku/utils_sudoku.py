@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader, TensorDataset, Subset
 import cvxpy as cp
 
 
-def setup_cvx_qp_problem(opt_var_dim, num_ineq, num_eq):
+def setup_cvx_qp_problem(opt_var_dim, num_ineq, num_eq, ignore_ineq=False):
     '''
     set up quadratic program functions for cvxpy, Q_cp is the square root of Q in the QP
     '''
@@ -41,12 +41,16 @@ def setup_cvx_qp_problem(opt_var_dim, num_ineq, num_eq):
     ineq_functions = [G_cp @ y_cp - h_cp]
     eq_functions = [A_cp @ y_cp -b_cp]
     ineq_constraints = [f<=0 for f in ineq_functions]
+    if ignore_ineq:
+        ineq_constraints=[]
     eq_constraints = [f==0 for f in eq_functions]
     
     problem = cp.Problem(cp.Minimize(objective_fn), eq_constraints+ineq_constraints)
     assert problem.is_dpp()
     
     params = [Q_cp, p_cp, G_cp, h_cp, A_cp, b_cp]
+    if ignore_ineq:
+        params = [Q_cp, p_cp, A_cp, b_cp]
     variables = [y_cp]
     
     return problem, objective_fn, ineq_functions, eq_functions, params, variables
