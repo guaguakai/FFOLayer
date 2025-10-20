@@ -116,12 +116,14 @@ def train_test_loop(args, experiment_dir, n):
                     print(f"\t\t train example: {i}/{len(train_loader)}")
                 x = x.to(device)
                 y = y.to(device)
+                iter_start_time = time.time()
                 
                 start_time = time.time()
                 pred = model(x)
                 loss = loss_fn(pred, y)
                 
                 forward_time += time.time() - start_time
+                iter_time = time.time() - iter_start_time
 
                 start_time = time.time()
                 loss.backward()
@@ -137,7 +139,7 @@ def train_test_loop(args, experiment_dir, n):
                 optimizer.zero_grad()
 
                 train_loss_list.append(loss.item())
-                print(f"train loss: {loss.item()}")
+                print(f"train loss: {loss.item()}, iter time: {iter_time}")
                 wandb.log({
                     "train_loss": loss.item(),
                 })
