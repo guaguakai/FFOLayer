@@ -6,7 +6,8 @@ Please install the required packages:
 - torch
 - qpth
 - cvxpylayer
-- gurobi
+- gurobi (python -m pip install gurobipy)
+- cvxtorch (git clone https://github.com/cvxpy/cvxtorch.git, cd cvxtorch, pip install -e .)
 - cvxpy
 
 ---

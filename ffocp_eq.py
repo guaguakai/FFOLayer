@@ -4,7 +4,7 @@ import numpy as np
 import os
 
 import torch
-from cvxtorch import TorchExpressions
+from cvxtorch import TorchExpression
 from cvxpylayers.torch import CvxpyLayer
 import wandb
 from utils import to_numpy, to_torch, _dump_cvxpy, n_threads, slice_params_for_batch
@@ -365,7 +365,10 @@ def _BLOLayerFn(
             ineq_dual = ctx.ineq_dual
             slack = ctx.slack
             y_dim = dvars_numpy[0].shape[1]
-            num_eq = eq_dual[0].shape[1]
+            if len(eq_dual) == 0:
+                num_eq = 0
+            else:
+                num_eq = eq_dual[0].shape[1]
             B = ctx.batch_size
 
             params_numpy = ctx.params_numpy

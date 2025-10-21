@@ -24,12 +24,12 @@ warnings.filterwarnings("ignore")
 def main():
     parser = argparse.ArgumentParser(
         description='Run electricity scheduling task net experiments.')
-    parser.add_argument('--task', type=str, default='cvxpylayer_lpgd', help='ffocp,qpth, ffoqp, ffoqp_eq_cst, ffoqp_eq_cst_parallelize, ffoqp_eq_cst_pdipm, cvxpylayer, cvxpylayer_lpgd')
+    parser.add_argument('--task', type=str, default='ffocp', help='ffocp, qpth, ffoqp, ffoqp_eq_cst, ffoqp_eq_cst_parallelize, ffoqp_eq_cst_pdipm, ffoqp_eq_cst_schur, cvxpylayer, cvxpylayer_lpgd')
     parser.add_argument('--save', type=str, 
         metavar='save-folder', help='prefix to add to save path')
     parser.add_argument('--nRuns', type=int, default=1,
         metavar='runs', help='number of runs')
-    parser.add_argument('--cuda_device', type=int, default=7, metavar='cuda_device', help='cuda device')
+    parser.add_argument('--cuda_device', type=int, default=0, metavar='cuda_device', help='cuda device')
     parser.add_argument('--seed', type=int, default=0, metavar='seed', help='random seed')
     parser.add_argument('--chunk_size', type=int, default=10, metavar='chunk_size', help='chunk size')
     args = parser.parse_args()
