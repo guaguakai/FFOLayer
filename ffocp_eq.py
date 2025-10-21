@@ -4,7 +4,7 @@ import numpy as np
 import os
 
 import torch
-from cvxtorch import TorchExpression
+from cvxtorch import TorchExpressions
 from cvxpylayers.torch import CvxpyLayer
 import wandb
 from utils import to_numpy, to_torch, _dump_cvxpy, n_threads, slice_params_for_batch

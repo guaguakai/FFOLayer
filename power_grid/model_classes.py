@@ -143,7 +143,7 @@ class SolveSchedulingQP(nn.Module):
 
 class SolveSchedulingCvxpyLayer(nn.Module):
     """Use cvxpylayers to solve one SQP QP subproblem in batch."""
-    def __init__(self, params, lpgd=False):
+    def __init__(self, params, device='cpu', lpgd=False):
         super().__init__()
         self.c_ramp = params["c_ramp"]
         self.n = params["n"]
