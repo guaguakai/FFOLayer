@@ -4,11 +4,11 @@ It has the advantage in computation and memory efficiency, but in the tradeoff o
 
 Please install the required packages:
 - torch
+- cvxpy
 - qpth
 - cvxpylayer
 - gurobi (python -m pip install gurobipy)
 - cvxtorch (git clone https://github.com/cvxpy/cvxtorch.git, cd cvxtorch, pip install -e .)
-- cvxpy
 
 ---
 

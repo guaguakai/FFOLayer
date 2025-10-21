@@ -13,3 +13,4 @@ output/*
 *copy*
 *logs*
 *cvxpy_logs*
+scripts/*
