@@ -224,7 +224,7 @@ if __name__ == '__main__':
     parser.add_argument('--dual_cutoff', type=float, default=1e-3, help='dual cutoff')
     parser.add_argument('--slack_tol', type=float, default=1e-8, help='slack tolerance')
 
-    parser.add_argument('--cuda_device', type=int, default=6, help='cuda device')
+    parser.add_argument('--cuda_device', type=int, default=0, help='cuda device')
     
     args = parser.parse_args()
     
