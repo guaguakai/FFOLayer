@@ -24,7 +24,7 @@ def train_test_loop(args, experiment_dir, n):
     board_side_len = n**2
     
     # device = torch.device('cpu') #torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    device = torch.device(f'cuda:{args.cuda_device}' if torch.cuda.is_available() else 'cpu')
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
@@ -223,6 +223,8 @@ if __name__ == '__main__':
     parser.add_argument('--alpha', type=float, default=100, help='alpha')
     parser.add_argument('--dual_cutoff', type=float, default=1e-3, help='dual cutoff')
     parser.add_argument('--slack_tol', type=float, default=1e-8, help='slack tolerance')
+
+    parser.add_argument('--cuda_device', type=int, default=6, help='cuda device')
     
     args = parser.parse_args()
     
@@ -237,7 +239,7 @@ if __name__ == '__main__':
     time_str = time.strftime("%Y%m%d_%H%M%S", time.localtime())
     if not os.path.exists(f"wandb/{args.method}"):
         os.makedirs(f"wandb/{args.method}")
-    wandb.init(project=f"bilevel_layer_sudoku_{args.method}", name=f"sudoku_{time_str}", config=vars(args), dir=f"wandb/{args.method}")
+    wandb.init(project=f"bilevel_layer_sudoku", name=f"sudoku_{time_str}", config=vars(args), dir=f"wandb/{args.method}")
     
     try:
         train_test_loop(args, experiment_dir, n=n)
