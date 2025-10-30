@@ -23,8 +23,8 @@ def train_test_loop(args, experiment_dir, n):
     
     board_side_len = n**2
     
-    device = torch.device('cpu') #torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # device = torch.device('cuda:3' if torch.cuda.is_available() else 'cpu')
+    # device = torch.device('cpu') #torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device(args.device) if torch.cuda.is_available() else torch.device('cpu')
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
@@ -137,11 +137,12 @@ def train_test_loop(args, experiment_dir, n):
                 loss = loss_fn(pred, y)
                 
                 forward_time += time.time() - start_time
-                iter_time = time.time() - iter_start_time
 
                 start_time = time.time()
                 loss.backward()
                 backward_time += time.time() - start_time
+
+                iter_time = time.time() - iter_start_time
                 
                 with torch.no_grad():
                     train_err += computeErr(pred)
@@ -196,7 +197,7 @@ def train_test_loop(args, experiment_dir, n):
                 train_loss_list.append(loss.item())
                 print(f"train loss: {loss.item()}, iter time: {iter_time}")
                 wandb.log({
-                    "train_loss": loss.item(),
+                    "train_loss": loss.item(), "iter_time": iter_time, "backward_time": backward_time, "forward_time": forward_time,
                 })
 
             if epoch%1==0 or epoch==num_epochs-1:
@@ -274,6 +275,8 @@ if __name__ == '__main__':
     parser.add_argument('--alpha', type=float, default=100, help='alpha')
     parser.add_argument('--dual_cutoff', type=float, default=1e-3, help='dual cutoff')
     parser.add_argument('--slack_tol', type=float, default=1e-8, help='slack tolerance')
+
+    parser.add_argument('--device', type=str, default='cuda:0', help='device')
     
     args = parser.parse_args()
     
