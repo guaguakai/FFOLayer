@@ -12,8 +12,10 @@ import cvxpy as cp
 from ffocp_eq import BLOLayer
 # from ffocp_eq_multithread_wo_list import BLOLayer as BLOLayerMT
 from ffocp_eq_multithread import BLOLayer as BLOLayerMT
-from ffoqp_eq_cst import ffoqp as ffoqpLayer
-from qpth.qp import QPFunction
+# from ffoqp_eq_cst import ffoqp as ffoqpLayer
+from ffoqp_eq_cst_schur import ffoqp as ffoqpLayer
+# from ffoqp_eq_cst_pdipm import ffoqp as ffoqpLayer
+from qpthlocal.qp import QPFunction
 from cvxpylayers.torch import CvxpyLayer
 from cvxpylayers_local.cvxpylayer import CvxpyLayer as LPGDLayer
 from ffoqp_lpgd import ffoqp as lpgd_ffoqp
@@ -168,7 +170,7 @@ class SingleOptLayerSudoku(nn.Module):
         
         
         ######## set up optimization layer
-        if self.layer_type not in [QPTH, FFOQP_EQ, LPGD_QP]:
+        if self.layer_type not in [QPTH, LPGD_QP]:
             problem, objective, ineq_functions, eq_functions, params, variables = setup_cvx_qp_problem(opt_var_dim=self.y_dim, num_ineq=self.num_ineq, num_eq=self.num_eq)
             
             multithread = True
@@ -191,8 +193,9 @@ class SingleOptLayerSudoku(nn.Module):
                         variables_list.append(variables)
                     
                     self.optlayer = BLOLayerMT(problem_list, parameters_list=params_list, variables_list=variables_list, alpha=alpha, dual_cutoff=dual_cutoff, slack_tol=slack_tol)
-                    # self.optlayer = BLOLayerMT(problem, parameters=params, variables=variables, alpha=alpha, dual_cutoff=dual_cutoff, slack_tol=slack_tol)
-                    
+                    # self.optlayer = BLOLayerMT(problem, parameters=params, variables=variables, alpha=alpha, dual_cutoff=dual_cutoff, slack_tol=slack_tol)    
+            elif layer_type==FFOQP_EQ:
+                self.optlayer = ffoqpLayer(alpha=alpha)
             elif layer_type==CVXPY_LAYER:
                 self.optlayer = CvxpyLayer(problem, parameters=params, variables=variables)
             elif layer_type==LPGD:
@@ -201,8 +204,6 @@ class SingleOptLayerSudoku(nn.Module):
         else:
             if self.layer_type==QPTH:
                 self.optlayer = QPFunction(verbose=-1)
-            elif self.layer_type==FFOQP_EQ:
-                self.optlayer = ffoqpLayer(alpha=alpha)
             elif self.layer_type==LPGD_QP:
                 self.optlayer = lpgd_ffoqp(alpha=alpha)
         
@@ -235,10 +236,6 @@ class SingleOptLayerSudoku(nn.Module):
             sol = self.optlayer(
                 self.Q, p, self.G, h, self.A, b
             )
-        # elif self.layer_type==FFOQP_EQ:
-        #     sol = self.optlayer(
-        #         self.Q, p, self.G, h, self.A, b
-        #     )
         else:
             # Expand constant params along batch dimension
             Q_batched = self.Q.unsqueeze(0).expand(nBatch, -1, -1)   # (batch, y_dim, y_dim)

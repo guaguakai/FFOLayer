@@ -17,6 +17,9 @@ from enum import Enum
 from utils import extract_nBatch, expandParam
 from typing import cast, List, Optional, Union
 
+from qpthlocal.solvers.pdipm import batch as pdipm_b
+from qpthlocal.solvers.pdipm.batch import KKTSolvers
+
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.set_float32_matmul_precision("high")
 
@@ -127,7 +130,7 @@ def cg_solve_list(Aop, b_list, x0_list=None, maxit=50, tol=1e-6):
     return xs
 
 def kkt_schur_fast(Q, A, delta, L_cached=None, eps_q=1e-8, eps_s=1e-10,
-                   cg_threshold=256, cg_maxit=50, cg_tol=1e-6, warm_dlam_list=None):
+                   cg_threshold=2560, cg_maxit=50, cg_tol=1e-6, warm_dlam_list=None):
     if delta.dim() == 3 and delta.size(-1) == 1:
         delta = delta.squeeze(-1)                   # (B,n)
     B, n, _ = Q.shape
@@ -193,8 +196,8 @@ def kkt_schur_fast(Q, A, delta, L_cached=None, eps_q=1e-8, eps_s=1e-10,
     return dz, dlam
 
 def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, check_Q_spd=True, chunk_size=100,
-          solver='GUROBI', solver_opts={"verbose": True},
-          exact_bwd_sol=True, dual_cutoff=1e-4):
+          solver='GUROBI', solver_opts={"verbose": False},
+          exact_bwd_sol=True, slack_cutoff=1e-8):
     """ -> kamo
     change lamb to alpha to prevent confusion
     """
@@ -224,53 +227,40 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, check_Q
             assert(neq > 0 or nineq > 0)
             ctx.neq, ctx.nineq, ctx.nz = neq, nineq, nz
 
-            # if solver == QPSolvers.PDIPM_BATCHED:
-            #     ctx.Q_LU, ctx.S_LU, ctx.R = pdipm_b.pre_factor_kkt(Q, G, A)
-            #     zhats, nus, lams, slacks = pdipm_b.forward(
-            #         Q, p, G, h, A, b, ctx.Q_LU, ctx.S_LU, ctx.R,
-            #         eps, verbose, notImprovedLim, maxIter)
-            # elif solver == QPSolvers.CVXPY:
-            # vals = torch.Tensor(nBatch).type_as(Q)
-            zhats = torch.Tensor(nBatch, ctx.nz).type_as(Q)
-            lams = torch.Tensor(nBatch, ctx.nineq).type_as(Q)
-            nus = torch.Tensor(nBatch, ctx.neq).type_as(Q) \
-                if ctx.neq > 0 else torch.Tensor()
-            slacks = torch.Tensor(nBatch, ctx.nineq).type_as(Q)
+            if nineq > 0:
+                ctx.Q_LU, ctx.S_LU, ctx.R = pdipm_b.pre_factor_kkt(Q, G, A)
+                zhats, nus, lams, slacks = pdipm_b.forward(
+                    Q, p, G, h, A, b, ctx.Q_LU, ctx.S_LU, ctx.R,
+                    eps, verbose, notImprovedLim, maxIter)
+            else:
+                raise NotImplementedError("Not implemented")
+            
+            # zhats = torch.Tensor(nBatch, ctx.nz).type_as(Q)
+            # lams = torch.Tensor(nBatch, ctx.nineq).type_as(Q)
+            # nus = torch.Tensor(nBatch, ctx.neq).type_as(Q) \
+            #     if ctx.neq > 0 else torch.Tensor()
+            # slacks = torch.Tensor(nBatch, ctx.nineq).type_as(Q)
 
-            for i in range(0, nBatch, chunk_size):
-                if chunk_size > 1:
-                    size = min(chunk_size, nBatch - i)
-                    Ai, bi = (A[i:i+size], b[i:i+size]) if neq > 0 else (None, None)
-                    _, zhati, nui, lami, si = forward_batch_np(
-                        *[x.cpu().numpy() if x is not None else None
-                          for x in (Q[i:i+size], p[i:i+size], G[i:i+size], h[i:i+size], Ai, bi)],
-                        solver=solver, solver_opts=solver_opts)
-                    # zhats[i:i+size] = torch.Tensor(zhati)
-                    # lams[i:i+size] = torch.Tensor(lami)
-                    # slacks[i:i+size] = torch.Tensor(si)
-                    # if neq > 0:
-                    #     nus[i:i+size] = torch.Tensor(nui)
-                    i = slice(i, i + size)
-                else:
-                    Ai, bi = (A[i], b[i]) if neq > 0 else (None, None)
-                    _, zhati, nui, lami, si = forward_single_np_eq_cst(
-                        *[x.cpu().numpy() if x is not None else None
-                          for x in (Q[i], p[i], G[i], h[i], Ai, bi)])
-                # if zhati[0] is None:
-                #     import IPython, sys; IPython.embed(); sys.exit(-1)
-                zhats[i] = torch.Tensor(zhati)
-                lams[i] = torch.Tensor(lami)
-                slacks[i] = torch.Tensor(si)
-                if neq > 0:
-                    nus[i] = torch.Tensor(nui)
-
-            # ctx.vals = vals
-            ctx.lams = lams
-            ctx.nus = nus
-            ctx.slacks = slacks
-
-            # else:
-            #     raise NotImplementedError("Solver not implemented")
+            # for i in range(0, nBatch, chunk_size):
+            #     if chunk_size > 1:
+            #         size = min(chunk_size, nBatch - i)
+            #         Ai, bi = (A[i:i+size], b[i:i+size]) if neq > 0 else (None, None)
+            #         _, zhati, nui, lami, si = forward_batch_np(
+            #             *[x.cpu().numpy() if x is not None else None
+            #               for x in (Q[i:i+size], p[i:i+size], G[i:i+size], h[i:i+size], Ai, bi)],
+            #             solver=solver, solver_opts=solver_opts)
+            #         i = slice(i, i + size)
+            #     else:
+            #         Ai, bi = (A[i], b[i]) if neq > 0 else (None, None)
+            #         _, zhati, nui, lami, si = forward_single_np_eq_cst(
+            #             *[x.cpu().numpy() if x is not None else None
+            #               for x in (Q[i], p[i], G[i], h[i], Ai, bi)])
+          
+            #     zhats[i] = torch.Tensor(zhati)
+            #     lams[i] = torch.Tensor(lami)
+            #     slacks[i] = torch.Tensor(si)
+            #     if neq > 0:
+            #         nus[i] = torch.Tensor(nui)
 
             # ctx.vals = vals
             ctx.lams = lams
@@ -287,6 +277,7 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, check_Q
             # Backward pass to compute gradients with respect to inputs
             zhats, lams, nus, Q_, p_, G_, h_, A_, b_ = ctx.saved_tensors
             lams = torch.clamp(lams, min=0)
+            slacks = torch.clamp(ctx.slacks, min=0)
 
             nBatch = extract_nBatch(Q_, p_, G_, h_, A_, b_)
             # Formulate a different QP to solve
@@ -309,7 +300,8 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, check_Q
 
             # this is a hack by kamo
             start_time = time.time()
-            active_constraints = (lams > dual_cutoff).unsqueeze(-1).float()
+            # active_constraints = (lams > dual_cutoff).unsqueeze(-1).float()
+            active_constraints = (slacks <= slack_cutoff).unsqueeze(-1).to(Q.dtype)
             G_active = G * active_constraints
             #h_active = h.unsqueeze(-1) * active_constraints
             #newp = p.unsqueeze(-1) + delta_directions / alpha

@@ -60,7 +60,7 @@ def solve_kkt_batched(Q, p, A, b, sigma=1e-8, ridge_Q=1e-12, sign=-1.0):
     nu = sol[:, n:].squeeze(-1)
     return z, nu
 
-def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, exact_bwd_sol=True, dual_cutoff=1e-4, check_Q_spd=False, chunk_size=None):
+def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, exact_bwd_sol=True, dual_cutoff=1e-4, slack_cutoff=1e-8, check_Q_spd=False, chunk_size=100):
     """ -> kamo
     change lamb to alpha to prevent confusion
     """
@@ -109,6 +109,7 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, exact_b
             # Backward pass to compute gradients with respect to inputs
             zhats, lams, nus, Q_, p_, G_, h_, A_, b_ = ctx.saved_tensors
             lams = torch.clamp(lams, min=0)
+            slacks = torch.clamp(ctx.slacks, min=0)
 
             nBatch = extract_nBatch(Q_, p_, G_, h_, A_, b_)
             # Formulate a different QP to solve
@@ -131,7 +132,8 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, exact_b
 
             # this is a hack by kamo
             start_time = time.time()
-            active_constraints = (lams > dual_cutoff).unsqueeze(-1).float()
+            # active_constraints = (lams > dual_cutoff).unsqueeze(-1).float()
+            active_constraints = (slacks <= slack_cutoff).unsqueeze(-1).to(Q.dtype)
             G_active = G * active_constraints
             #h_active = h.unsqueeze(-1) * active_constraints
             #newp = p.unsqueeze(-1) + delta_directions / alpha
@@ -149,7 +151,8 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, exact_b
                 aapl = rsqrtQ @ -delta_directions
                 Aq = G_active @ rsqrtQ
                 pine = torch.linalg.lstsq(Aq, Aq @ aapl).solution
-                dlam = torch.linalg.lstsq(Aq.transpose(-1, -2), pine, driver='gelsd').solution
+                # dlam = torch.linalg.lstsq(Aq.transpose(-1, -2), pine, driver='gelsd').solution
+                dlam = torch.linalg.lstsq(Aq.transpose(-1, -2), pine, driver='gels').solution
                 dz = rsqrtQ @ (aapl - pine)
                 dzhat[:] = dz
                 dnu[:] = dlam[..., 0]

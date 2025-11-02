@@ -35,7 +35,7 @@ from typing import cast, List, Optional, Union
 
 def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, check_Q_spd=True, chunk_size=100,
           solver='GUROBI', solver_opts={"verbose": False},
-          exact_bwd_sol=True, dual_cutoff=1e-4):
+          exact_bwd_sol=True, slack_cutoff=1e-8):
     """ -> kamo
     change lamb to alpha to prevent confusion
     """
@@ -121,13 +121,14 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, check_Q
             ctx.save_for_backward(zhats, lams, nus, Q_, p_, G_, h_, A_, b_)
             # print('value', vals)
             # print('solution', zhats)
-            return zhats
+            return zhats,
 
         @staticmethod
         def backward(ctx, grad_output):
             # Backward pass to compute gradients with respect to inputs
             zhats, lams, nus, Q_, p_, G_, h_, A_, b_ = ctx.saved_tensors
             lams = torch.clamp(lams, min=0)
+            slacks = torch.clamp(ctx.slacks, min=0)
 
             nBatch = extract_nBatch(Q_, p_, G_, h_, A_, b_)
             # Formulate a different QP to solve
@@ -150,7 +151,9 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, check_Q
 
             # this is a hack by kamo
             start_time = time.time()
-            active_constraints = (lams > dual_cutoff).unsqueeze(-1).float()
+            # active_constraints = (lams > dual_cutoff).unsqueeze(-1).float()
+            active_constraints = (slacks <= slack_cutoff).unsqueeze(-1).to(Q.dtype)
+            # import pdb; pdb.set_trace()
             G_active = G * active_constraints
             #h_active = h.unsqueeze(-1) * active_constraints
             #newp = p.unsqueeze(-1) + delta_directions / alpha
@@ -175,7 +178,7 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, check_Q
                     left=False)
                 pine = torch.linalg.lstsq(Aq, Aq @ aapl).solution
                 # dlam = torch.linalg.lstsq(Aq.mT, pine, driver='gelsd').solution
-                dlam = torch.linalg.solve(Aq.mT, pine, driver='gels').solution
+                dlam = torch.linalg.lstsq(Aq.mT, pine, driver='gels').solution
                 dz = torch.linalg.solve_triangular(sqrtQ.mT, aapl - pine, upper=True)
                 dzhat[:] = dz
                 dnu[:] = dlam[..., 0]
@@ -205,7 +208,7 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, check_Q
                 A_torch = A.detach().clone().requires_grad_(True)
                 b_torch = b.detach().clone().requires_grad_(True)
                
-                objectives = (dzhat.transpose(-1,-2) @ Q_torch @ zhats + p_torch.unsqueeze(1) @ dzhat).squeeze(-1,-2)
+                objectives = (dzhat.transpose(-1,-2) @ Q_torch @ zhats + p_torch.unsqueeze(1) @ dzhat).squeeze(-1).squeeze(-1)
                 violations = G_torch @ zhats - h_torch.unsqueeze(-1)
 
                 ineq_penalties = (
