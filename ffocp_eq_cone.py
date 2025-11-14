@@ -80,6 +80,8 @@ def BLOLayer(
         # Inequality: g(x,θ) <= 0 -> store g(x,θ)
         elif isinstance(c, cp.constraints.nonpos.Inequality):
             ineq_funcs.append(c.expr)
+            ineq_is_soc.append(False)
+            soc_var_indices.append(None)
 
         elif isinstance(c, SOC):
             # Build g(z) = ||x||_2 - t <= 0, which is equivalent
@@ -494,8 +496,16 @@ def _BLOLayerFn(
             sol_diffs = []
 
             for i in range(B):
+                if ctx.batch:
+                    params_numpy_i = [
+                        p[i] if bs > 0 else p
+                        for p, bs in zip(params_numpy, ctx.batch_sizes)
+                    ]
+                else:
+                    params_numpy_i = params_numpy
+                
                 for j, _ in enumerate(blolayer.param_order):
-                    blolayer.param_order[j].value = params_numpy[j][i]
+                    blolayer.param_order[j].value = params_numpy_i[j]
 
                 for j, v in enumerate(blolayer.variables):
                     blolayer.dvar_params[j].value = dvars_numpy[j][i]
@@ -562,7 +572,7 @@ def _BLOLayerFn(
                 for c_id, c in enumerate(blolayer.active_eq_constraints):
                     if c.dual_value.any() == None:
                         print(f"active inequality constraint {c_id} dual value is None")
-                    active_mask = np.array([a.value for a in blolayer.active_mask_params])
+                    # active_mask = np.array([a.value for a in blolayer.active_mask_params])
                     new_active_dual[c_id][i, ...] = c.dual_value
             
             # print('--- sol_diff mean: ', np.mean(np.array(sol_diffs)), 'max: ', np.max(np.array(sol_diffs)), 'min: ', np.min(np.array(sol_diffs)))

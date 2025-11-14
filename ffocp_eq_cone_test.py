@@ -9,36 +9,49 @@ from ffocp_eq_cone import BLOLayer
 def test_soc_blolayer_vs_cvxpy():
     torch.manual_seed(0)
 
-    n = 5
-    z = cp.Variable(n)
-    q = cp.Parameter(n)
+    n = 100
+    n_eq_constraints   = 0
+    n_ineq_constraints = 50
+    Q = torch.eye(n)
+    q = torch.rand(n)
+    q.requires_grad_(True)
+    A = torch.empty(n_eq_constraints, n)
+    b = torch.empty(n_eq_constraints)
+    G = torch.randn(n_ineq_constraints, n)
+    h = torch.randn(n_ineq_constraints)
+    
+    Q_cp = cp.Parameter((n, n), PSD=True)
+    q_cp = cp.Parameter(n)
+    # A_cp = cp.Parameter((n_eq_constraints, n))
+    # b_cp = cp.Parameter(n_eq_constraints)
+    G_cp = cp.Parameter((n_ineq_constraints, n))
+    h_cp = cp.Parameter(n_ineq_constraints)
+    z_cp = cp.Variable(n)
+    
+    optimizer = torch.optim.SGD([q], lr=0.1)
 
-    objective = 0.5 * cp.sum_squares(z) + q.T @ z
-    constraints = [cp.SOC(1.0, z)]
+    objective_fn = 0.5 * cp.sum_squares(Q_cp @ z_cp) + q_cp.T @ z_cp
+    constraints = [G_cp @ z_cp <= h_cp, cp.SOC(1.0, z_cp)]
 
-    problem = cp.Problem(cp.Minimize(objective), constraints)
+    problem = cp.Problem(cp.Minimize(objective_fn), constraints)
     assert problem.is_dpp()
 
-    cvx_layer = CvxpyLayer(problem, parameters=[q], variables=[z])
-    blolayer = BLOLayer(problem, parameters=[q], variables=[z], compute_cos_sim=False)
+    cvx_layer = CvxpyLayer(problem, parameters=[Q_cp, q_cp, G_cp, h_cp], variables=[z_cp])
+    blolayer = BLOLayer(problem, parameters=[Q_cp, q_cp, G_cp, h_cp], variables=[z_cp], compute_cos_sim=False)
 
-    q_torch = torch.randn(n, requires_grad=True)
-
-    q_gt = q_torch.clone().detach().requires_grad_(True)
-    sol_cvx, = cvx_layer(q_gt)
+    sol_cvx, = cvx_layer(Q, q, G, h)
     loss_cvx = sol_cvx.sum()
     loss_cvx.backward()
-    grad_cvx = q_gt.grad.detach().clone()
+    grad_cvx = q.grad.detach().clone()
+    optimizer.zero_grad()
 
     print("CvxpyLayer gradient:", grad_cvx)
 
-    batch_size = 1
-    q_bl = q_torch.unsqueeze(0).expand(batch_size, n)
-    q_bl = q_bl.clone().detach().requires_grad_(True)
-    sol_blo, = blolayer(q_bl)
+    sol_blo, = blolayer(Q, q, G, h)
     loss_blo = sol_blo.sum()
     loss_blo.backward()
-    grad_blo = q_bl.grad.detach().clone()
+    grad_blo = q.grad.detach().clone()
+    optimizer.zero_grad()
 
     print("BLOLayer gradient:", grad_blo)
 
