@@ -176,7 +176,7 @@ class _BLOLayer(torch.nn.Module):
         self.eq_dual_params   = [cp.Parameter(shape=f.shape) for f in eq_functions]
         self.ineq_dual_params = [cp.Parameter(shape=f.shape) for f in ineq_functions]
         self.active_mask_params = [cp.Parameter(shape=f.shape) for f in ineq_functions]
-        self.soc_dual_params_0 = [cp.Parameter(shape=f.dual_variables[0].shape) for f in soc_functions]
+        self.soc_dual_params_0 = [cp.Parameter(shape=f.dual_variables[0].shape, nonneg=True) for f in soc_functions]
         self.soc_dual_params_1 = [cp.Parameter(shape=f.dual_variables[1].shape) for f in soc_functions]
         self.soc_lam_params = [cp.Parameter(shape=f.shape) for f in soc_functions]
 
@@ -196,7 +196,7 @@ class _BLOLayer(torch.nn.Module):
         ]
         self.soc_lin_constraints = [
             self.soc_dual_params_1[j].T @ soc_functions[j].args[1].expr
-            - cp.multiply(soc_functions[j].args[0].expr, self.soc_dual_params_0[j]) == 0
+            + cp.multiply(soc_functions[j].args[0].expr, self.soc_dual_params_0[j]) == 0
             for j in range(len(soc_functions))
         ]
         self.perturbed_problem = cp.Problem(cp.Minimize(self.new_objective),
