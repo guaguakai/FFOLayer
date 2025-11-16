@@ -40,16 +40,15 @@ class MLP(nn.Module):
 
     def forward(self, x):
         x = x.view(-1, self.input_dim)
-        # x = self.activation(self.fc1(x))
-        x = self.activation(self.batch_norm1(self.fc1(x)))
+        # x = self.activation(self.fc1(x)) ###SHING HEI: removed batch norm for batch size 1
+        x = self.activation((self.fc1(x)))
         # x = self.activation(self.fc2(x))
-        x = self.activation(self.batch_norm2(self.fc2(x)))
+        x = self.activation((self.fc2(x)))
         x = torch.clamp(self.fc3(x), min=-self.bound, max=self.bound)
         return x
     
     
-def setup_cvxpy_synthetic_problem(n):
-    n_ineq_constraints = 2 * n + 1
+def setup_cvxpy_synthetic_problem(n, n_ineq_constraints, unconstrained=False):
     Q_cp = cp.Parameter((n, n), PSD=True)
     q_cp = cp.Parameter(n)
     G_cp = cp.Parameter((n_ineq_constraints, n))
@@ -57,13 +56,20 @@ def setup_cvxpy_synthetic_problem(n):
     z_cp = cp.Variable(n)
 
     objective_fn = 0.5 * cp.sum_squares(Q_cp @ z_cp) + q_cp.T @ z_cp
-    constraints = [G_cp @ z_cp <= h_cp]
-
-    problem = cp.Problem(cp.Minimize(objective_fn), constraints)
-    assert problem.is_dpp()
-    
-    parameters = [Q_cp, q_cp, G_cp, h_cp]
     variables = [z_cp]
+    if not unconstrained:
+    
+        constraints = [G_cp @ z_cp <= h_cp]
+
+        problem = cp.Problem(cp.Minimize(objective_fn), constraints)
+        assert problem.is_dpp()
+        
+        parameters = [Q_cp, q_cp, G_cp, h_cp]
+    
+    else:
+        parameters = [Q_cp, q_cp]
+        constraints = []
+        problem = cp.Problem(cp.Minimize(objective_fn), constraints)
 
     return problem, objective_fn, constraints, parameters, variables
 
@@ -81,8 +87,9 @@ def get_feasible_h(G, z0, s0):
     assert(not torch.any(s0<0))
     return torch.matmul(G, z0) + s0
 
+
 class OptModel(nn.Module):
-    def __init__(self, input_dim, opt_dim, layer_type, constraint_learnable, device, batch_size, alpha=100, dual_cutoff=1e-3, slack_tol=1e-6, ):
+    def __init__(self, input_dim, opt_dim, layer_type, constraint_learnable, device, batch_size, alpha=100, dual_cutoff=1e-3, slack_tol=1e-6):
         '''
         The architecture is {parameter - optLayer}.
             
@@ -93,23 +100,25 @@ class OptModel(nn.Module):
         self.layer_type = layer_type
         assert(layer_type in [FFOCP_EQ, CVXPY_LAYER, LPGD, QPTH, LPGD_QP, FFOQP_EQ, FFOQP_EQ_SCHUR, FFOQP_EQ_PARALLELIZE, FFOQP_EQ_PDIPM])
         
+        self.constraint_learnable = constraint_learnable
         self.y_dim = opt_dim
         self.input_dim = input_dim
         self.num_ineq = 2 * opt_dim + 1
         self.num_eq = 0
         
-        self.constraint_learnable = constraint_learnable
         
-        #### predictor of parameters
-        # if constraint_learnable:
-        #     self.predictor = MLP(input_dim, self.y_dim + self.num_ineq*self.y_dim + self.y_dim + self.num_ineq)
-        # else:
         self.predictor = MLP(input_dim, self.y_dim)
         
         ### default optimization parameters
         self.Q = torch.eye(opt_dim).to(device)#.double()
         G = torch.cat([torch.eye(opt_dim), -torch.eye(opt_dim), torch.ones(1,opt_dim)], dim=0)#.double()
         h = torch.cat([torch.zeros(opt_dim), torch.ones(opt_dim), torch.Tensor([3])], dim=0)#.double()
+        
+        ### simple 
+        # G = torch.ones(1,opt_dim).to(device)
+        # G[:,1:] = 0.0
+        # h = torch.Tensor([0]).to(device)
+        
         self.A = torch.Tensor().to(device)
         self.b = torch.Tensor().to(device)
         
@@ -124,23 +133,23 @@ class OptModel(nn.Module):
             self.h = h.to(device)
             
         if self.layer_type not in [QPTH, LPGD_QP]:
-            problem, objective_fn, constraints, params, variables = setup_cvxpy_synthetic_problem(opt_dim)
+            problem, objective_fn, constraints, params, variables = setup_cvxpy_synthetic_problem(opt_dim, self.num_ineq)
     
             multithread = False
             if layer_type==FFOCP_EQ:
                 if not multithread:
-                    self.optlayer = BLOLayer(problem, parameters=params, variables=variables, alpha=alpha, dual_cutoff=dual_cutoff, slack_tol=slack_tol)
+                    self.optlayer = BLOLayer(problem, parameters=params, variables=variables, alpha=alpha, dual_cutoff=dual_cutoff, slack_tol=slack_tol, eps=1e-12)
                 else:
                     problem_list = []
                     params_list = []
                     variables_list = []
                     for i in range(batch_size):
-                        problem, objective_fn, constraints, params, variables = setup_cvxpy_synthetic_problem(opt_dim)
+                        problem, objective_fn, constraints, params, variables = setup_cvxpy_synthetic_problem(opt_dim, self.num_ineq)
                         problem_list.append(problem)
                         params_list.append(params)
                         variables_list.append(variables)
                     
-                    self.optlayer = BLOLayerMT(problem_list, parameters_list=params_list, variables_list=variables_list, alpha=alpha, dual_cutoff=dual_cutoff, slack_tol=slack_tol)
+                    self.optlayer = BLOLayerMT(problem_list, parameters_list=params_list, variables_list=variables_list, alpha=alpha, dual_cutoff=dual_cutoff, slack_tol=slack_tol, eps=1e-12)
                     
             elif layer_type==CVXPY_LAYER:
                 self.optlayer = CvxpyLayer(problem, parameters=params, variables=variables)

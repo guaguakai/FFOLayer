@@ -22,7 +22,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=3, help='random seed')
     parser.add_argument('--lr', type=float, default=0.00001, help='learning rate')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')
-    parser.add_argument('--ydim', type=int, default=200, help='dimension of y')
+    parser.add_argument('--ydim', type=int, default=1000, help='dimension of y')
     
     parser.add_argument('--alpha', type=float, default=100, help='alpha')
     parser.add_argument('--dual_cutoff', type=float, default=1e-3, help='dual cutoff')
@@ -70,8 +70,6 @@ if __name__ == '__main__':
     deltas = [torch.zeros_like(parameter) for parameter in model.parameters()]
     gradients = [torch.zeros_like(parameter) for parameter in model.parameters()]
 
-    # Note: the current version only works for the CVXPY solver
-    # solver = QPSolvers.PDIPM_BATCHED
 
     directory = '../synthetic_results_{}{}/{}/'.format(args.batch_size, args.suffix, method)
     filename = '{}_ydim{}_lr{}_seed{}.csv'.format(method, ydim, learning_rate, seed)
@@ -145,17 +143,20 @@ if __name__ == '__main__':
 
             #         test_ts_loss_list.append(ts_loss.item())
             #         test_df_loss_list.append(df_loss.item())
-            model.eval()
-            for i, (x, y) in enumerate(test_loader):
-                # print("batch size : ", x.shape[0])
-                z, y_pred = model(x) #opt solution, predicted q
-                ts_loss = loss_fn(y_pred, y)
-                df_loss = torch.mean(y * z)
+            # model.eval()
+            # for i, (x, y) in enumerate(test_loader):
+            #     # print("batch size : ", x.shape[0])
+            #     z, y_pred = model(x) #opt solution, predicted q
+            #     ts_loss = loss_fn(y_pred, y)
+            #     df_loss = torch.mean(y * z)
                 
-                optimizer.zero_grad()
+            #     optimizer.zero_grad()
 
-                test_ts_loss_list.append(ts_loss.item())
-                test_df_loss_list.append(df_loss.item())
+            #     test_ts_loss_list.append(ts_loss.item())
+            #     test_df_loss_list.append(df_loss.item())
+            
+            test_ts_loss_list.append(0)
+            test_df_loss_list.append(0)
 
 
             train_ts_loss = np.mean(train_ts_loss_list)
