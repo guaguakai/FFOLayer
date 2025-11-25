@@ -13,7 +13,8 @@ import cvxpy as cp
 import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 
-from ffocp_eq import BLOLayer
+# from ffocp_eq import BLOLayer
+from ffocp_eq_cone_general_dpp import BLOLayer
 from ffocp_eq_multithread import BLOLayer as BLOLayerMT
 import ffoqp
 import ffoqp_eq_cst
@@ -196,7 +197,8 @@ if __name__ == '__main__':
                 Q_batch = Q.unsqueeze(0).expand(cur_batch_size, -1, -1).contiguous()
                 G_batch = G.unsqueeze(0).expand(cur_batch_size, -1, -1).contiguous()
                 h_batch = h.unsqueeze(0).expand(cur_batch_size, -1).contiguous()
-                sol = ffocp_layer(Q_batch, y_pred, G_batch, h_batch)
+                sol = ffocp_layer(Q_batch, y_pred, G_batch, h_batch, solver_args={"solver": cp.SCS, "max_iters": 1000, "eps": 1e-4})
+                # sol = ffocp_layer(Q_batch, y_pred, G_batch, h_batch)
                 z = sol[0]
                 loss = torch.mean(y * z) + ts_loss * ts_weight + torch.norm(z) * norm_weight
             elif method == 'ts':
