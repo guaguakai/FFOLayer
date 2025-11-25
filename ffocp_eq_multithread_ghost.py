@@ -258,20 +258,22 @@ class _BLOLayer(torch.nn.Module):
             variables = self.variables_list[i]
 
             ineq_dual_product = cp.sum([cp.sum(cp.multiply(du, f)) for du, f in zip(self.ineq_dual_params_list[i], ineq_functions)])
-            self.ineq_dual_term_torch_list.append(TorchExpression(
-                ineq_dual_product,
-                provided_vars_list=[*variables, *self.param_order_list[i], *self.ineq_dual_params_list[i]]
-            ).torch_expression)
+            if len(ineq_functions) > 0:
+                self.ineq_dual_term_torch_list.append(TorchExpression(
+                    ineq_dual_product,
+                    provided_vars_list=[*variables, *self.param_order_list[i], *self.ineq_dual_params_list[i]]
+                ).torch_expression)
 
             eq_dual_product = cp.sum([cp.sum(cp.multiply(du, f)) for du, f in zip(self.eq_dual_params_list[i], eq_functions)])
-            self.eq_dual_term_torch_list.append(TorchExpression(
-                eq_dual_product,
-                provided_vars_list=[*variables, *self.param_order_list[i], *self.eq_dual_params_list[i]]
-            ).torch_expression)
+            if len(eq_functions) > 0:
+                self.eq_dual_term_torch_list.append(TorchExpression(
+                    eq_dual_product,
+                    provided_vars_list=[*variables, *self.param_order_list[i], *self.eq_dual_params_list[i]]
+                ).torch_expression)
 
             phi_expr = objective \
-                + cp.sum([cp.sum(cp.multiply(du, f)) for du, f in zip(self.eq_dual_params_list[i], eq_functions)]) \
-                + cp.sum([cp.sum(cp.multiply(du, f)) for du, f in zip(self.ineq_dual_params_list[i], ineq_functions)])
+                + eq_dual_product \
+                + ineq_dual_product
             phi_torch = TorchExpression(
                 phi_expr,
                 provided_vars_list=[*variables, *self.param_order_list[i], *self.eq_dual_params_list[i], *self.ineq_dual_params_list[i]]
@@ -658,6 +660,7 @@ def _BLOLayerFn(
             if ctx.device != torch.device('cpu'):
                 torch.set_default_device(torch.device(ctx.device))
             loss = 0.0
+            
             with torch.enable_grad():
                 for i in range(B):
                     vars_new_i = [v[i] for v in new_sol]
@@ -670,11 +673,19 @@ def _BLOLayerFn(
                     old_eq_dual_i = [to_torch(eq_dual[j][i], ctx.dtype, ctx.device) for j in range(len(blolayer.eq_constraints_list[i]))]
                     old_ineq_dual_i = [to_torch(ineq_dual[j][i], ctx.dtype, ctx.device) for j in range(len(blolayer.ineq_functions_list[i]))]
 
-                    ineq_dual_term_new_i = blolayer.ineq_dual_term_torch_list[i](*vars_old_i, *params_i, *new_ineq_dual_i)
-                    ineq_dual_term_old_i = blolayer.ineq_dual_term_torch_list[i](*vars_old_i, *params_i, *old_ineq_dual_i)
-                    
-                    eq_dual_term_new_i = blolayer.eq_dual_term_torch_list[i](*vars_old_i, *params_i, *new_eq_dual_i)
-                    eq_dual_term_old_i = blolayer.eq_dual_term_torch_list[i](*vars_old_i, *params_i, *old_eq_dual_i)
+                    if len(blolayer.ineq_dual_term_torch_list) > 0:
+                        ineq_dual_term_new_i = blolayer.ineq_dual_term_torch_list[i](*vars_old_i, *params_i, *new_ineq_dual_i)
+                        ineq_dual_term_old_i = blolayer.ineq_dual_term_torch_list[i](*vars_old_i, *params_i, *old_ineq_dual_i)
+                    else:
+                        ineq_dual_term_new_i = 0.0
+                        ineq_dual_term_old_i = 0.0
+
+                    if len(blolayer.eq_dual_term_torch_list) > 0:
+                        eq_dual_term_new_i = blolayer.eq_dual_term_torch_list[i](*vars_old_i, *params_i, *new_eq_dual_i)
+                        eq_dual_term_old_i = blolayer.eq_dual_term_torch_list[i](*vars_old_i, *params_i, *old_eq_dual_i)
+                    else:
+                        eq_dual_term_new_i = 0.0
+                        eq_dual_term_old_i = 0.0
 
                     phi_new_i = blolayer.phi_torch_list[i](*vars_new_i, *params_i, *old_eq_dual_i, *old_ineq_dual_i)
                     phi_old_i = blolayer.phi_torch_list[i](*vars_old_i, *params_i, *old_eq_dual_i, *old_ineq_dual_i)
