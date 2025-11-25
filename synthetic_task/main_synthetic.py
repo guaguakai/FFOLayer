@@ -148,76 +148,50 @@ if __name__ == '__main__':
                 loss = df_loss + ts_loss * ts_weight + torch.norm(z) * norm_weight
                 
                 forward_time_ = time.time() - start_time
-                forward_time += forward_time_
-
+                
                 start_time = time.time()
                 loss.backward()
                 backward_time_ = time.time() - start_time
-                backward_time += backward_time_
+                
                 
                 iter_time = time.time() - iter_start_time
                 
                 
-                ##### more timing measurements optionally
-                # if method=="ffocp_eq":
-                #     if i%(len(train_loader)//2)==0:
-                #         forward_optimization_time_ = model.optlayer.time_forward_optimization
-                #         backward_optimization_time_ = model.optlayer.time_backward_optimization
-                #         pre_autograd_time_ = model.optlayer.time_pre_autograd
-                #         autograd_time_ = model.optlayer.time_autograd
-                        
-                #         forward_num_iters = model.optlayer.forward_num_iters
-                #         forward_lin_sys_time = model.optlayer.forward_lin_sys_time
-                #         backward_num_iters = model.optlayer.backward_num_iters
-                #         backward_lin_sys_time = model.optlayer.backward_lin_sys_time
-                        
-                #         forward_solve_time_ = model.optlayer.forward_solve_time
-                #         backward_solve_time_ = model.optlayer.backward_solve_time
-                #         forward_setup_time_ = model.optlayer.forward_setup_time
-                #         backward_setup_time_ = model.optlayer.backward_setup_time
-                        
-                #         forward_optimization_time += forward_optimization_time_
-                #         backward_optimization_time += backward_optimization_time_
-                #         pre_autograd_time += pre_autograd_time_
-                #         autograd_time += autograd_time_
-                        
-                #         forward_solve_time += forward_solve_time_
-                #         backward_solve_time += backward_solve_time_
-                #         forward_setup_time += forward_setup_time_
-                #         backward_setup_time += backward_setup_time_
-                        
-                        
-                #         if method=="ffocp_eq":
-                #             with open(timing_directory + timing_filename, 'a') as timing_file:
-                #                 timing_file.write(f'{epoch},{forward_time_},{backward_time_},{forward_optimization_time_},{backward_optimization_time_},{forward_num_iters},{backward_num_iters},{forward_setup_time_},{backward_setup_time_},{forward_solve_time_},{backward_solve_time_},{pre_autograd_time_},{autograd_time_}\n')
-                #                 timing_file.flush()
+                do_record = not(epoch==0 and i==0)
+                if do_record:
+                    forward_time += forward_time_
+                    backward_time += backward_time_
                 
-                if method=="ffocp_eq":
-                    forward_solve_time_ = model.optlayer.forward_solve_time
-                    backward_solve_time_ = model.optlayer.backward_solve_time
-                    forward_setup_time_ = model.optlayer.forward_setup_time
-                    backward_setup_time_ = model.optlayer.backward_setup_time
-                elif method=="lpgd" or method=="cvxpylayer":
-                    forward_solve_time_ = model.optlayer.info['solve_time']
-                    backward_solve_time_ = model.optlayer.info['dDT_time']
-                    forward_setup_time_ = model.optlayer.info['canon_time']
-                    backward_setup_time_ = model.optlayer.info['dcanon_time']
-                else:
-                    forward_solve_time_ = forward_time_
-                    backward_solve_time_ = backward_time_
-                    forward_setup_time_ = 0
-                    backward_setup_time_ = 0
+                    if method=="ffocp_eq":
+                        forward_solve_time_ = model.optlayer.forward_solve_time
+                        backward_solve_time_ = model.optlayer.backward_solve_time
+                        forward_setup_time_ = model.optlayer.forward_setup_time
+                        backward_setup_time_ = model.optlayer.backward_setup_time
+                    elif method=="lpgd" or method=="cvxpylayer":
+                        forward_solve_time_ = model.optlayer.info['solve_time']
+                        backward_solve_time_ = model.optlayer.info['dDT_time']
+                        forward_setup_time_ = model.optlayer.info['canon_time']
+                        backward_setup_time_ = model.optlayer.info['dcanon_time']
+                    else:
+                        forward_solve_time_ = forward_time_
+                        backward_solve_time_ = backward_time_
+                        forward_setup_time_ = 0
+                        backward_setup_time_ = 0
+                        
+                        
+                    forward_solve_time += forward_solve_time_
+                    backward_solve_time += backward_solve_time_
+                    forward_setup_time += forward_setup_time_
+                    backward_setup_time += backward_setup_time_
+                
+                
+                    with open(step_experiment_dir + filename, 'a') as step_file:
+                        step_file.write(f'{epoch},{i},{df_loss.item()},{forward_time_},{backward_time_},{forward_solve_time_},{backward_solve_time_},{forward_setup_time_},{backward_setup_time_}\n')
+                        step_file.flush()
+                        
+                    train_ts_loss_list.append(ts_loss.item())
+                    train_df_loss_list.append(df_loss.item())
                     
-                    
-                forward_solve_time += forward_solve_time_
-                backward_solve_time += backward_solve_time_
-                forward_setup_time += forward_setup_time_
-                backward_setup_time += backward_setup_time_
-                
-                
-                with open(step_experiment_dir + filename, 'a') as step_file:
-                    step_file.write(f'{epoch},{i},{df_loss.item()},{forward_time_},{backward_time_},{forward_solve_time_},{backward_solve_time_},{forward_setup_time_},{backward_setup_time_}\n')
-                    step_file.flush()
 
 
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
@@ -226,8 +200,6 @@ if __name__ == '__main__':
 
                 optimizer.zero_grad()
 
-                train_ts_loss_list.append(ts_loss.item())
-                train_df_loss_list.append(df_loss.item())
                 
                 
                 print(f"train loss: {loss.item()}, iter time: {iter_time}")
