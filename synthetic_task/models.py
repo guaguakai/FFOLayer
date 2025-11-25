@@ -12,7 +12,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 from ffocp_eq_timing import BLOLayer
-from ffocp_eq_multithread import BLOLayer as BLOLayerMT
+# from ffocp_eq_multithread import BLOLayer as BLOLayerMT
+from ffocp_eq_multithread_ghost import BLOLayer as BLOLayerMT
 
 from qpthlocal.qp import QPFunction
 # from cvxpylayers.torch import CvxpyLayer
