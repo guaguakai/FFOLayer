@@ -77,18 +77,18 @@ def train_test_loop(args, experiment_dir, step_experiment_dir, n):
     directory = experiment_dir
     time_str = time.strftime("%Y%m%d_%H%M%S", time.localtime())
     filename = '{}_n{}_lr{}_seed{}_{time_str}.csv'.format(method, n, learning_rate, seed, time_str=time_str)
-    if os.path.exists(directory + filename):
-        os.remove(directory + filename)
+    # if os.path.exists(directory + filename):
+    #     os.remove(directory + filename)
 
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+    # if not os.path.exists(directory):
+    os.makedirs(directory, exist_ok=True)
     
     ### record step wise statistics
-    if os.path.exists(step_experiment_dir + filename):
-        os.remove(step_experiment_dir + filename)
+    # if os.path.exists(step_experiment_dir + filename):
+    #     os.remove(step_experiment_dir + filename)
 
-    if not os.path.exists(step_experiment_dir):
-        os.makedirs(step_experiment_dir)
+    # if not os.path.exists(step_experiment_dir):
+    os.makedirs(step_experiment_dir, exist_ok=True)
         
     with open(step_experiment_dir + filename, 'w') as step_file:
         step_file.write('iter, train_loss, iter_forward_time, iter_backward_time, train_error, accum_forward_time, accum_backward_time\n')

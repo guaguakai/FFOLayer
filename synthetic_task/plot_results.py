@@ -13,10 +13,10 @@ BASE_DIR = f"../synthetic_results_{batch_size}"
 # BASE_DIR = f"../synthetic_results_1_compare_SCS_OSQP_dim200_debug"
 METHODS = [
     "ffocp_eq",
-    # "lpgd",
+    "lpgd",
     "cvxpylayer",
-    # "ffoqp_eq_schur",
-    # "qpth"
+    "ffoqp_eq_schur",
+    "qpth"
 ]
 METHODS_STEPS = [method+"_steps" for method in METHODS]
 LINEWIDTH = 1.5
@@ -245,7 +245,7 @@ def plot_total_time_vs_method(df, time_names=['forward_time', 'backward_time'], 
     plt.ylabel("Time")
     plt.title("Total Time vs Method")
     plt.legend()
-    plt.savefig(f"{plot_path}/{plot_name_tag}_total_time_vs_method.png", dpi=300, bbox_inches='tight')
+    plt.savefig(f"{plot_path}/{plot_name_tag}_total_time_vs_method.pdf", dpi=300, bbox_inches='tight')
     plt.close()
 
 def plot_losse_vs_epoch(df, loss_metric_name, iteration_name='epoch', plot_path=BASE_DIR, plot_name_tag=""):
@@ -257,7 +257,7 @@ def plot_losse_vs_epoch(df, loss_metric_name, iteration_name='epoch', plot_path=
     plt.ylabel("loss")
     plt.title(f"Loss vs {iteration_name}")
     
-    plt.savefig(f"{plot_path}/{plot_name_tag}_{loss_metric_name}_vs_{iteration_name}.png", dpi=300, bbox_inches='tight')
+    plt.savefig(f"{plot_path}/{plot_name_tag}_{loss_metric_name}_vs_{iteration_name}.pdf", dpi=300, bbox_inches='tight')
     plt.close()
 
         

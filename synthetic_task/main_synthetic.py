@@ -73,17 +73,17 @@ if __name__ == '__main__':
 
     directory = '../synthetic_results_{}{}/{}/'.format(args.batch_size, args.suffix, method)
     filename = '{}_ydim{}_lr{}_seed{}.csv'.format(method, ydim, learning_rate, seed)
-    if os.path.exists(directory + filename):
-        os.remove(directory + filename)
+    # if os.path.exists(directory + filename):
+    #     os.remove(directory + filename)
 
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+    # if not os.path.exists(directory):
+    os.makedirs(directory, exist_ok=True)
         
     step_experiment_dir = '../synthetic_results_{}{}/{}_steps/'.format(args.batch_size, args.suffix, method)
-    if os.path.exists(step_experiment_dir + filename):
-        os.remove(step_experiment_dir + filename)
-    if not os.path.exists(step_experiment_dir):
-        os.makedirs(step_experiment_dir)
+    # if os.path.exists(step_experiment_dir + filename):
+    #     os.remove(step_experiment_dir + filename)
+    # if not os.path.exists(step_experiment_dir):
+    os.makedirs(step_experiment_dir, exist_ok=True)
     with open(step_experiment_dir + filename, 'w') as step_file:
         step_file.write('epoch, iter, train_df_loss, iter_forward_time, iter_backward_time, forward_solve_time, backward_solve_time, forward_setup_time, backward_setup_time\n')
         step_file.flush()
