@@ -33,8 +33,11 @@ method_order = [METHODS_LEGEND[m] for m in METHODS]
 markers = ["o", "s", "D", "^", "v"]
 markers_dict = {method: markers[i] for i, method in enumerate(method_order)}
 
-
 LINEWIDTH = 1.5
+
+
+# EPOCH_0_PATH = f"../synthetic_results_epoch_zero"
+# EPOCH_0_DF = pd.read_csv(os.path.join(EPOCH_0_PATH, "epoch_0.csv"))
 
 def load_results(base_dir=BASE_DIR, methods=METHODS):
     dfs = []
@@ -44,13 +47,20 @@ def load_results(base_dir=BASE_DIR, methods=METHODS):
             df = pd.read_csv(fp)
             # if m=="ffoqp_eq_schur_steps" or m=="ffoqp_eq_schur":
             #     m = "ffoqp_eq"
-            m = m.removesuffix("_steps")
-            df["method"] = METHODS_LEGEND[m]
+            new_m = m.removesuffix("_steps")
+            df["method"] = METHODS_LEGEND[new_m]
 
             fname = os.path.basename(fp)
             def grab(pat, cast=float):
                 mo = re.search(pat, fname)
                 return cast(mo.group(1)) if mo else np.nan
+            
+            seed = grab(r"_seed(\d+)", int)
+            # Join with epoch 0 results to get the epoch 0 train df loss
+            # epoch_0_loss = EPOCH_0_DF[(EPOCH_0_DF["method"]==m) & (EPOCH_0_DF["seed"]==seed)]["train_df_loss"].values
+            # epoch_0_row = [0,0,epoch_0_loss,0,0,0,0,0,0]
+            
+            
 
             df["seed"] = grab(r"_seed(\d+)", int)
             df["ydim"] = grab(r"ydim(\d+)", int)
@@ -122,7 +132,13 @@ def plot_total_time_vs_method(df, time_names=['forward_time', 'backward_time'], 
     
 def plot_losse_vs_epoch(df, loss_metric_name, iteration_name='epoch', plot_path=BASE_DIR, plot_name_tag="", loss_range=None, stride=50):
     df_avg_epoch = df.groupby(['method', iteration_name])[[loss_metric_name]].mean().reset_index()
-    df_avg_epoch = df_avg_epoch[df_avg_epoch[iteration_name] % stride == 0]
+    print(df_avg_epoch)
+    
+    epoch_0_loss = -0.00950829166918993
+    df_avg_epoch.loc[df_avg_epoch[iteration_name] == 0, loss_metric_name] = epoch_0_loss
+
+    
+    # df_avg_epoch = df_avg_epoch[df_avg_epoch[iteration_name] % stride == 0]
 
     # --- Forward Time Figure ---
     plt.figure(figsize=(8,5))
