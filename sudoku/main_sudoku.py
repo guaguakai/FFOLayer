@@ -143,8 +143,6 @@ def train_test_loop(args, experiment_dir, step_experiment_dir, n):
                 
                 forward_start_time = time.time()
                 pred = model(x)
-                # print(f"pred abs max: {torch.max(torch.abs(pred))}, pred abs min:{torch.min(torch.abs(pred))}")
-                # print(f"pred : {decode_onehot(pred[0])}")
                 loss = loss_fn(pred, y)
                 
                 forward_time += time.time() - forward_start_time
