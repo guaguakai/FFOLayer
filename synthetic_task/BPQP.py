@@ -33,13 +33,13 @@ def qp_osqp_backward(x_value, y_value, P, G, A, grad_output):
 def BPQP(args, sign=-1):
     class BPQPmethod(Function):
         @staticmethod
-        def forward(ctx, P, q):
+        def forward(ctx, P, q, G, h, A, b):
             n_dim = P.shape[0]
             n_ineq = n_dim
-            G = torch.diag_embed(torch.ones(n_dim)).to(device)
-            h = torch.zeros(n_ineq).to(device)
-            A = torch.ones(n_dim).unsqueeze(0).to(device)
-            b = torch.tensor([1]).to(device)
+            # G = torch.diag_embed(torch.ones(n_dim)).to(device)
+            # h = torch.zeros(n_ineq).to(device)
+            # A = torch.ones(n_dim).unsqueeze(0).to(device)
+            # b = torch.tensor([1]).to(device)
 
             _P, _q, _osA, _l, _u = create_qp_instances(P, sign * q, G, h, A, b)
             x_value, y_value, _ = osqp_interface(_P, _q, _osA, _l, _u)

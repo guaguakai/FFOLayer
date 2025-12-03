@@ -10,6 +10,7 @@ from cvxpylayers.torch import CvxpyLayer
 from cvxpy.constraints.second_order import SOC
 import wandb
 from utils import to_numpy, to_torch, _dump_cvxpy, n_threads, slice_params_for_batch
+from typing import Any, Dict, List
 
 @torch.no_grad()
 def _compare_grads(params_req, grads, ground_truth_grads):
@@ -33,6 +34,17 @@ def _compare_grads(params_req, grads, ground_truth_grads):
     # rel_l2_diff = l2_diff / gt.norm().clamp_min(eps)
     return cos_sim, l2_diff
 
+def _pickle_clone(obj: Any) -> Any:
+    """Deep clone with pickle/cloudpickle. Needed to avoid shared CVXPY graphs across threads."""
+    try:
+        return _pickle.loads(_pickle.dumps(obj))
+    except Exception as e:
+        raise RuntimeError(
+            "Could not clone CVXPY objects for multithreading. "
+            "Install cloudpickle or run num_threads=1."
+        ) from e
+
+
 # wrapper function for BLOLayer
 def BLOLayer(
     problem: cp.Problem,
@@ -43,6 +55,8 @@ def BLOLayer(
     slack_tol: float = 1e-8,
     eps: float = 1e-7,
     compute_cos_sim: bool = False,
+    num_threads: int = 1,
+    backward_eps: float = 1e-7,
 ):
     """
     Create an optimization layer that can be called like a CvxpyLayer:
@@ -107,7 +121,9 @@ def BLOLayer(
         alpha=alpha,
         dual_cutoff=dual_cutoff,
         slack_tol=slack_tol,
-        eps=eps,
+        eps=eps,   
+        backward_eps=backward_eps,
+        num_threads=num_threads,
         _compute_cos_sim=compute_cos_sim,
     )
 
@@ -148,7 +164,7 @@ class _BLOLayer(torch.nn.Module):
         ```
     """
 
-    def __init__(self, objective, eq_functions, scalar_ineq_functions, cone_constraints, cone_exprs, parameters, variables, alpha, dual_cutoff, slack_tol, eps, _compute_cos_sim=False):
+    def __init__(self, objective, eq_functions, scalar_ineq_functions, cone_constraints, cone_exprs, parameters, variables, alpha, dual_cutoff, slack_tol, eps, backward_eps, num_threads, _compute_cos_sim=False):
         """Construct a BLOLayer
 
         Args:
@@ -178,7 +194,9 @@ class _BLOLayer(torch.nn.Module):
         self.dual_cutoff = dual_cutoff
         self.slack_tol = float(slack_tol) 
         self._compute_cos_sim = _compute_cos_sim
+        self.num_threads = num_threads
         self.eps = eps
+        self.backward_eps = backward_eps
 
         self.eq_constraints = [f == 0 for f in self.eq_functions]
         self.scalar_ineq_constraints = [g <= 0 for g in self.scalar_ineq_functions]
@@ -286,6 +304,39 @@ class _BLOLayer(torch.nn.Module):
         self.backward_setup_time = 0
         self.forward_solve_time = 0
         self.backward_solve_time = 0
+
+        # --- Multi-thread slot structure (one independent cvxpy graph per batch element i) ---
+        self._slots_lock = threading.Lock()
+        self._slots = []  # list[dict] of independent cvxpy objects
+
+        # pickle a *single dict* that contains all cvxpy objects that must stay consistent together
+        slot_template = dict(
+            problem=self.problem,
+            perturbed_problem=self.perturbed_problem,
+            param_order=self.param_order,
+            variables=self.variables,
+            eq_constraints=self.eq_constraints,
+            scalar_ineq_constraints=self.scalar_ineq_constraints,
+            cone_constraints=self.cone_constraints,
+            eq_functions=self.eq_functions,
+            scalar_ineq_functions=self.scalar_ineq_functions,
+            cone_exprs=self.cone_exprs,
+            active_eq_constraints=self.active_eq_constraints,
+            dvar_params=self.dvar_params,
+            eq_dual_params=self.eq_dual_params,
+            scalar_ineq_dual_params=self.scalar_ineq_dual_params,
+            scalar_active_mask_params=self.scalar_active_mask_params,
+            cone_dual_params=self.cone_dual_params,
+            cone_primal_star=self.cone_primal_star,
+            cone_active_mask=self.cone_active_mask,
+        )
+        self._slot_template_blob = _pickle.dumps(slot_template)
+
+        def _clone_slot():
+            # IMPORTANT: unpickle the *whole dict* so internal references are consistent
+            return _pickle.loads(self._slot_template_blob)
+
+        self._clone_slot = _clone_slot  # store callable
 
     def forward(self, *params, solver_args={}):
         """Solve problem (or a batch of problems) corresponding to `params`
@@ -430,80 +481,95 @@ def _BLOLayerFn(
                 for g in blolayer.cone_exprs
             ]
 
-            for i in range(B):
+            def _solve_one_forward(i):
+                slot = blolayer._slots[i]
+
+                # pick params for this batch element
                 if ctx.batch:
-                    # select the i-th batch element for each parameter
-                    params_numpy_i = [
-                        p[i] if bs > 0 else p for p, bs in zip(params_numpy, ctx.batch_sizes)
-                    ]
+                    params_numpy_i = [p[i] if bs > 0 else p for p, bs in zip(params_numpy, ctx.batch_sizes)]
                 else:
                     params_numpy_i = params_numpy
 
-                for p, q in zip(params_numpy_i, blolayer.param_order):
-                    q.value = p
+                # assign into slot parameters
+                for p_val, q in zip(params_numpy_i, slot["param_order"]):
+                    q.value = p_val
 
                 try:
-                    # blolayer.problem.solve(solver=cp.GUROBI, ignore_dpp=True, warm_start=True, **{"Threads": n_threads, "OutputFlag": 0})
-                    blolayer.problem.solve(solver=cp.SCS, warm_start=False, ignore_dpp=True, max_iters=2500, eps=blolayer.eps)
-                    # blolayer.problem.solve(**ctx.solver_args)
-                except:
-                    print("Forward pass GUROBI failed, using OSQP")
-                    blolayer.problem.solve(solver=cp.OSQP, warm_start=False, verbose=False)
+                    slot["problem"].solve(**ctx.solver_args)
+                except Exception:
+                    slot["problem"].solve(solver=cp.OSQP, warm_start=False, verbose=False)
 
-                # print(f"Forward compilation time: {blolayer.problem.compilation_time}")
-                # print(f"Forward setup time: {blolayer.problem.solver_stats.setup_time}")
-                # print(f"Forward solve time: {blolayer.problem.solver_stats.solve_time}")
-                # print(f"Forward num iters: {blolayer.problem.solver_stats.num_iters}")
-                
-                assert blolayer.problem.status in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE)
-                # primal
-                for v_id, v in enumerate(blolayer.variables):
-                    sol_numpy[v_id][i, ...] = v.value
+                st = slot["problem"].status
+                if st not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
+                    raise RuntimeError(f"Forward status={st}")
 
-                # eq dual
-                for c_id, c in enumerate(blolayer.eq_constraints):
-                    eq_dual[c_id][i, ...] = c.dual_value
+                sol_i = [np.array(v.value, dtype=float) for v in slot["variables"]]
+                eq_dual_i = [np.array(c.dual_value, dtype=float) for c in slot["eq_constraints"]]
 
-                # ineq dual & slack
-                for j, g_expr in enumerate(blolayer.scalar_ineq_functions):
-                    g_val = g_expr.value
-                    scalar_ineq_dual[j][i, ...] = blolayer.scalar_ineq_constraints[j].dual_value
-                    s_val = -g_val
-                    s_val = np.maximum(s_val, 0.0)
-                    scalar_ineq_slack[j][i, ...] = s_val
+                scalar_dual_i, scalar_slack_i = [], []
+                for j, g_expr in enumerate(slot["scalar_ineq_functions"]):
+                    g_val = np.array(g_expr.value, dtype=float)
+                    scalar_dual_i.append(np.array(slot["scalar_ineq_constraints"][j].dual_value, dtype=float))
+                    scalar_slack_i.append(np.maximum(-g_val, 0.0))
 
-                # cone primal & dual
-                for j, g_expr in enumerate(blolayer.cone_exprs):
-                    cone_primal_vals[j][i, ...] = np.array(g_expr.value, dtype=float)
+                cone_primal_i = [np.array(g.value, dtype=float) for g in slot["cone_exprs"]]
 
-                for j, c in enumerate(blolayer.cone_constraints):
+                cone_dual_i = []
+                for j, c in enumerate(slot["cone_constraints"]):
                     dv_raw = c.dual_value
-
                     if isinstance(dv_raw, (list, tuple)):
-                        flat_chunks = []
-                        for part in dv_raw:
-                            part_arr = np.asarray(part, dtype=float)
-                            flat_chunks.append(part_arr.reshape(-1))
-                        dv_flat = np.concatenate(flat_chunks, axis=0)
+                        dv_flat = np.concatenate([np.asarray(part, dtype=float).reshape(-1) for part in dv_raw], axis=0)
                     else:
                         dv_flat = np.asarray(dv_raw, dtype=float).reshape(-1)
 
-                    g_shape = blolayer.cone_exprs[j].shape
+                    g_shape = slot["cone_exprs"][j].shape
                     n_expected = int(np.prod(g_shape))
                     if dv_flat.size != n_expected:
-                        print(
-                            f"[WARN] cone dual size mismatch at constraint {j}: "
-                            f"got {dv_flat.size}, expected {n_expected}"
-                        )
-                        exit()
-                        # if dv_flat.size > n_expected:
-                        #     dv_flat = dv_flat[:n_expected]
-                        # else:
-                        #     dv_flat = np.pad(dv_flat, (0, n_expected - dv_flat.size))
+                        raise RuntimeError(f"cone dual size mismatch at {j}: got {dv_flat.size}, expected {n_expected}")
 
-                    dv_arr = dv_flat.reshape(g_shape)
-                    cone_dual_vals[j][i, ...] = dv_arr
+                    cone_dual_i.append(dv_flat.reshape(g_shape))
 
+                stats = slot["problem"].solver_stats
+                setup_t = getattr(stats, "setup_time", 0.0) or 0.0
+                solve_t = getattr(stats, "solve_time", 0.0) or 0.0
+                return sol_i, eq_dual_i, scalar_dual_i, scalar_slack_i, cone_primal_i, cone_dual_i, setup_t, solve_t
+
+            if B == 1 or n_threads <= 1:
+                results = [_solve_one_forward(0)]
+            else:
+                with threadpool_limits(limits=1):
+                    pool = ThreadPool(processes=min(B, n_threads))
+                    try:
+                        results = pool.map(_solve_one_forward, range(B))
+                    finally:
+                        pool.close()
+                        # pool.join()
+
+            # write results into preallocated arrays
+            avg_setup = 0.0
+            avg_solve = 0.0
+            for i, (sol_i, eq_i, ineq_i, slack_i, cone_p_i, cone_d_i, setup_i, solve_i) in enumerate(results):
+                avg_setup += setup_i
+                avg_solve += solve_i
+
+                for v_id in range(len(blolayer.variables)):
+                    sol_numpy[v_id][i, ...] = sol_i[v_id]
+
+                for c_id in range(len(blolayer.eq_constraints)):
+                    eq_dual[c_id][i, ...] = eq_i[c_id]
+
+                for j in range(len(blolayer.scalar_ineq_functions)):
+                    scalar_ineq_dual[j][i, ...] = ineq_i[j]
+                    scalar_ineq_slack[j][i, ...] = slack_i[j]
+
+                for j in range(len(blolayer.cone_exprs)):
+                    cone_primal_vals[j][i, ...] = cone_p_i[j]
+                    cone_dual_vals[j][i, ...] = cone_d_i[j]
+
+            if B > 0:
+                avg_setup /= B
+                avg_solve /= B
+            print(f"[MT forward] avg setup={avg_setup:.6f}, avg solve={avg_solve:.6f}")
 
             ctx.sol_numpy = sol_numpy
             ctx.eq_dual = eq_dual

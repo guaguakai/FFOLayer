@@ -5,7 +5,7 @@ import time
 import os
 
 from cvxpylayers.torch import CvxpyLayer
-from ffocp_eq_cone_general_dpp import BLOLayer
+from ffocp_eq_cone_general_not_dpp import BLOLayer
 
 torch.set_default_dtype(torch.double) 
 
@@ -15,9 +15,9 @@ def random_problem(
     k, 
     p_eq=0, 
     p_ineq=0, 
-    margin=0.05, 
+    margin=1, 
     scale=0.1,
-    local_fraction=0.5,
+    local_fraction=0.1,
 ):
     Q = torch.eye(n)
     q = (scale * torch.randn(n)).requires_grad_()
@@ -95,7 +95,7 @@ def test_soc_blolayer_vs_cvxpy(seed=0):
     torch.manual_seed(seed)
 
     n = 50
-    m = 5
+    m = 300
     k = 1
     p_eq = 10
     p_ineq = 50
@@ -148,7 +148,7 @@ def test_soc_blolayer_vs_cvxpy(seed=0):
     blolayer = BLOLayer(problem, parameters=params_cp, variables=[x_cp])
 
     cpu_threads = os.cpu_count()
-    repeat_times = 20
+    repeat_times = 2
     
     # with torch.no_grad():
     #     start_time = time.time()
@@ -163,6 +163,8 @@ def test_soc_blolayer_vs_cvxpy(seed=0):
     cvx_total_fw_time = []
     blo_total_bw_time = []
     cvx_total_bw_time = []
+    cos_sim_list = []
+    l2_diff_list = []
     for _ in range(repeat_times):
         _, q, A_list, b_list, c_list, d_list, F, g, H, h = random_problem(n, m, k, p_eq, p_ineq)
         params_torch = [q] + A_list + b_list + c_list + d_list + [F, g, H, h]
@@ -173,7 +175,7 @@ def test_soc_blolayer_vs_cvxpy(seed=0):
         # sol_blo, = blolayer(*params_torch, solver_args={"solver": cp.GUROBI, "Threads": cpu_threads})
         # sol_blo, = blolayer(*params_torch, solver_args={"solver": cp.MOSEK, "mosek_params": {'MSK_DPAR_OPTIMIZER_MAX_TIME':  1, }})
         # sol_blo, = blolayer(*params_torch, solver_args={"solver": cp.MOSEK})
-        sol_blo, = blolayer(*params_torch, solver_args={"solver": cp.SCS, "max_iters": 2000, "eps": 1e-3, "warm_start": True})
+        sol_blo, = blolayer(*params_torch, solver_args={"solver": cp.SCS, "max_iters": 2000, "eps": 1e-8, "warm_start": True})
         blo_forward_end_time = time.time()
         print(f"BLOLayer forward time: {blo_forward_end_time - blo_forward_start_time}")
 
@@ -207,6 +209,18 @@ def test_soc_blolayer_vs_cvxpy(seed=0):
         cvx_total_fw_time.append(cvx_forward_end_time - cvx_forward_start_time)
         cvx_total_bw_time.append(cvx_loss_backward_end_time - cvx_loss_backward_start_time)
 
+
+        est = grad_blo.reshape(-1)
+        gt  = grad_cvx.reshape(-1)
+
+        eps = 1e-12
+        denom = (est.norm() * gt.norm()).clamp_min(eps)
+        cos_sim = torch.dot(est, gt) / denom
+        l2_diff = (est - gt).norm()
+
+        cos_sim_list.append(cos_sim)
+        l2_diff_list.append(l2_diff)
+
     print(f"CvxpyLayer total forward time: {cvx_total_fw_time}")
     print(f"CvxpyLayer total backward time: {cvx_total_bw_time}")
     print(f"CvxpyLayer mean forward time: {np.mean(cvx_total_fw_time[1:])}")
@@ -216,19 +230,8 @@ def test_soc_blolayer_vs_cvxpy(seed=0):
     print(f"BLOLayer total backward time: {blo_total_bw_time}")
     print(f"BLOLayer mean forward time: {np.mean(blo_total_fw_time[1:])}")
     print(f"BLOLayer mean backward time: {np.mean(blo_total_bw_time[1:])}")
-    
 
-    # est = grad_blo.reshape(-1)
-    # gt  = grad_cvx.reshape(-1)
-
-    # eps = 1e-12
-    # denom = (est.norm() * gt.norm()).clamp_min(eps)
-    # cos_sim = torch.dot(est, gt) / denom
-    # l2_diff = (est - gt).norm()
-
-    # print(f"cosine similarity: {cos_sim.item():.6f}")
-    # print(f"L2 difference:     {l2_diff.item():.6e}")
-
+    print(f"cosine similarity: {cos_sim_list}")
 
 if __name__ == "__main__":
     for seed in range(1):
