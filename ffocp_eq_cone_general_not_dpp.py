@@ -671,8 +671,8 @@ def _BLOLayerFn(
                     else:
                         blolayer.cone_active_mask[j].value = 0.0
 
-                print(f"Number of active ineq constraints: {blolayer.scalar_active_mask_params[0].value.sum()}")    
-                print(f"Number of active cones: {_num_active_cones}")
+                # print(f"Number of active ineq constraints: {blolayer.scalar_active_mask_params[0].value.sum()}")    
+                # print(f"Number of active cones: {_num_active_cones}")
 
                 for j, _ in enumerate(blolayer.eq_functions):
                     blolayer.eq_dual_params[j].value = eq_dual[j][i]

@@ -94,7 +94,7 @@ def setup_cvxpy_synthetic_problem_with_cones(n, n_ineq_constraints, cone_dim, un
 
     # === SOC constraints ===
     # TODO: now only one cone, add multiple cones later
-    constraints.append(cp.SOC(10, z_cp))
+    constraints.append(cp.SOC(1, z_cp))
 
     if not unconstrained:
         constraints.append(G_cp @ z_cp <= h_cp)
@@ -260,12 +260,12 @@ class OptModel(nn.Module):
                 self.G = G.to(device)
                 self.h = h.to(device)
             
-            n_cones = 10
             cone_dim = opt_dim
             problem, objective_fn, constraints, params, variables = setup_cvxpy_synthetic_problem_with_cones(opt_dim, self.num_ineq, cone_dim)
+            multithread = False
             if layer_type==FFOCP_EQ:
                 if not multithread:
-                    self.optlayer = BLOLayer(problem, parameters=params, variables=variables, alpha=alpha, dual_cutoff=dual_cutoff, slack_tol=slack_tol, eps=1e-12, solver_name="SCS")
+                    self.optlayer = BLOLayerGeneral(problem, parameters=params, variables=variables, alpha=alpha, dual_cutoff=dual_cutoff, slack_tol=slack_tol, eps=1e-12)
                 else:
                     problem_list = []
                     params_list = []
