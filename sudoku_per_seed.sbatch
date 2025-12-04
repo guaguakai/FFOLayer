@@ -21,8 +21,8 @@ echo "Running seed=$seed"
 epochs=1
 batchSize=8
 n=3
-methods=("ffocp_eq" "cvxpylayer" "lpgd" "ffoqp_eq" "qpth")
-
+# methods=("ffocp_eq" "cvxpylayer" "lpgd" "ffoqp_eq" "qpth" "bpqp")
+methods=("bpqp")
 for method in "${methods[@]}"; do
     echo "Running method=$method, seed=$seed"
     python sudoku/main_sudoku.py --method=$method --seed=$seed --epochs=$epochs --batch_size=$batchSize --n=$n

@@ -25,7 +25,7 @@ from ffoqp_lpgd import ffoqp as lpgd_ffoqp
 
 
 from utils_sudoku import setup_cvx_qp_problem, get_sudoku_matrix
-from constants import FFOCP_EQ, QPTH, LPGD, CVXPY_LAYER, FFOQP_EQ, LPGD_QP
+from constants import FFOCP_EQ, QPTH, LPGD, CVXPY_LAYER, FFOQP_EQ, LPGD_QP, BPQP
 
 
 
