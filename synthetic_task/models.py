@@ -211,6 +211,26 @@ class OptModel(nn.Module):
                 elif layer_type == FFOQP_EQ_PDIPM:
                     self.optlayer = ffoqp_eq_cst_pdipm.ffoqp(alpha=alpha)
                 elif layer_type == FFOQP_EQ_SCHUR: ## use this ffoqp_cst
+                    problem, objective_fn, constraints, params, variables = setup_cvxpy_synthetic_problem(opt_dim, self.num_ineq)
+                    eq_funcs, ineq_funcs = [], []
+                    for c in problem.constraints:
+                        # Equality: g(x,θ) == 0  -> store g(x,θ)
+                        if isinstance(c, cp.constraints.zero.Equality):
+                            eq_funcs.append(c.expr)
+
+                        # Inequality: g(x,θ) <= 0 -> store g(x,θ)
+                        elif isinstance(c, cp.constraints.nonpos.Inequality):
+                            ineq_funcs.append(c.expr)
+
+                        else:
+                            # save for PSD or SOC constraints
+                            raise NotImplementedError(
+                                f"Constraint type {type(c)} not supported in BLOLayer wrapper."
+                            )
+                    cvxpy_instance = {"variables":variables, "params":params, "problem":problem, "eq_constraints":[], "ineq_constraints":constraints,\
+                        "eq_functions":eq_funcs, "ineq_functions":ineq_funcs}
+                    
+                    
                     self.optlayer = ffoqp_eq_cst_schur.ffoqp(alpha=alpha, chunk_size=1)
                 elif layer_type == FFOQP_EQ_PARALLELIZE:
                     self.optlayer = ffoqp_eq_cst_parallelize.ffoqp(alpha=alpha, chunk_size=1)

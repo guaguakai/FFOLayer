@@ -7,7 +7,7 @@ from torch.autograd import Function
 import numpy as np
 import scipy
 import time
-import cvxpy
+import cvxpy as cp
 # import solvers
 # from qpthlocal.solvers.pdipm import batch as pdipm_b
 # from qpthlocal.solvers.pdipm import spbatch as pdipm_spb
@@ -197,7 +197,7 @@ def kkt_schur_fast(Q, A, delta, L_cached=None, eps_q=1e-8, eps_s=1e-10,
 
 def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, check_Q_spd=False, chunk_size=100,
           solver='PDIPM', solver_opts={"verbose": False},
-          exact_bwd_sol=True, slack_cutoff=1e-8):
+          exact_bwd_sol=True, slack_cutoff=1e-8, cvxpy_instance=None):
     """ -> kamo
     change lamb to alpha to prevent confusion
     try solver GUROBI
@@ -229,10 +229,62 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, check_Q
             ctx.neq, ctx.nineq, ctx.nz = neq, nineq, nz
 
             if nineq > 0 and solver == 'PDIPM':
-                ctx.Q_LU, ctx.S_LU, ctx.R = pdipm_b.pre_factor_kkt(Q, G, A)
-                zhats, nus, lams, slacks = pdipm_b.forward(
-                    Q, p, G, h, A, b, ctx.Q_LU, ctx.S_LU, ctx.R,
-                    eps, verbose, notImprovedLim, maxIter)
+                if cvxpy_instance is None:
+                    ctx.Q_LU, ctx.S_LU, ctx.R = pdipm_b.pre_factor_kkt(Q, G, A)
+                    zhats, nus, lams, slacks = pdipm_b.forward(
+                        Q, p, G, h, A, b, ctx.Q_LU, ctx.S_LU, ctx.R,
+                        eps, verbose, notImprovedLim, maxIter)
+                else:
+                    cvxpy_params = cvxpy_instance["params"]
+                    cvxpy_problem = cvxpy_instance["problem"]
+                    cvxpy_variables = cvxpy_instance["variables"]
+                    eq_constraints = cvxpy_instance["eq_constriants"]
+                    ineq_constraints = cvxpy_instance["ineq_constraints"]
+                    eq_functions = cvxpy_instance["eq_functions"]
+                    ineq_functions = cvxpy_instance["ineq_functions"]
+                    #parameters = [Q_cp, q_cp, G_cp, h_cp]
+                    params_torch = [Q, p, G, h]
+                    params_numpy = [param.detach().cpu().numpy() for param in params_torch]
+                    
+                    sol_numpy = [np.empty((nBatch,) + v.shape, dtype=float) for v in cvxpy_variables]
+                    eq_dual = [np.empty((nBatch,) + f.shape, dtype=float) for f in eq_functions]
+                    ineq_dual = [np.empty((nBatch,) + g.shape, dtype=float) for g in ineq_functions]
+                    ineq_slack_residual = [np.empty((nBatch,) + g.shape, dtype=float) for g in ineq_functions]
+                    
+                    for i in range(nBatch):
+                        for p_val, param_obj in zip(params_numpy, cvxpy_params):
+                            param_obj.value = p_val[i]
+                        
+                        cvxpy_problem.solve(solver=cp.OSQP, warm_start=False, verbose=False, eps_abs=1e-4, eps_rel=1e-4, max_iter=2500)
+                        
+                        sol_i = [v.value for v in cvxpy_variables]
+                        eq_i = [c.dual_value for c in eq_constraints]
+                        ineq_i = [c.dual_value for c in ineq_constraints]
+                        slack_i = [np.maximum(-expr.value, 0.0) for expr in ineq_functions]
+                        
+                        for v_id, v in enumerate(cvxpy_variables):
+                            sol_numpy[v_id][i, ...] = sol_i[v_id]
+
+                        for c_id, c in enumerate(eq_constraints):
+                            eq_dual[c_id][i, ...] = eq_i[c_id]
+
+                        for c_id, c in enumerate(ineq_constraints):
+                            ineq_dual[c_id][i, ...] = ineq_i[c_id]
+
+                        for c_id, expr in enumerate(ineq_functions):
+                            g_val = expr.value
+                            s_val = -g_val
+                            s_val = np.maximum(s_val, 0.0)
+                            ineq_slack_residual[c_id][i, ...] = slack_i[c_id]
+                    
+                    device = Q.device
+                    dtype = Q.dtype
+
+                    zhats  = [torch.from_numpy(arr).to(device=device, dtype=dtype) for arr in sol_numpy][0]
+                    nus    = [torch.from_numpy(arr).to(device=device, dtype=dtype) for arr in eq_dual][0]
+                    lams   = [torch.from_numpy(arr).to(device=device, dtype=dtype) for arr in ineq_dual][0]
+                    slacks = [torch.from_numpy(arr).to(device=device, dtype=dtype) for arr in ineq_slack_residual][0]
+
             elif nineq > 0:
                 print("Using {} solver".format(solver))
                 zhats = torch.Tensor(nBatch, ctx.nz).type_as(Q)

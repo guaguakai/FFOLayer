@@ -4,9 +4,9 @@
 #SBATCH --mem-per-cpu=128G                 # memory per core
 #SBATCH -t 12:00:00                           # duration of the job
 #SBATCH --cpus-per-task=4
-#SBATCH --output=/storage/home/hcoda1/9/zzhao628/r-kwang692-0/synthetic_sbatch_output/%j.out
+#SBATCH --output=/storage/home/hcoda1/3/sho73/r-kwang692-0/synthetic_sbatch_output/%j.out
 
-HOME=/storage/home/hcoda1/9/zzhao628
+HOME=/storage/home/hcoda1/3/sho73
 REPO_PATH=$HOME/r-kwang692-0/FFOLayer
 
 cd $REPO_PATH
@@ -20,7 +20,7 @@ seed=$1
 echo "Running seed=$seed"
 
 # methods=("ffocp_eq" "cvxpylayer" "lpgd" "ffoqp_eq_schur" "qpth")
-methods=("bpqp")
+methods=("ffocp_eq")
 epochs=1
 batchSize=8
 ydim=900

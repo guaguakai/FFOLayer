@@ -425,7 +425,8 @@ def _BLOLayerFn(
                 
                 try:
                     # blolayer.problem_list[i].solve(solver=cp.GUROBI, ignore_dpp=True, warm_start=True, **{"Threads": n_threads, "OutputFlag": 0})
-                    blolayer.problem_list[i].solve(solver=cp.SCS, warm_start=False, ignore_dpp=True, max_iters=2500, eps=blolayer.eps)
+                    # blolayer.problem_list[i].solve(solver=cp.SCS, warm_start=False, ignore_dpp=True, max_iters=2500, eps=blolayer.eps)
+                    blolayer.problem_list[i].solve(solver=cp.OSQP, warm_start=False, verbose=False, eps_abs=1e-5, eps_rel=1e-5, max_iter=2500)
                 except:
                     print("forward pass SCS failed, using OSQP")
                     blolayer.problem_list[i].solve(solver=cp.OSQP, warm_start=False, verbose=False)
@@ -590,7 +591,8 @@ def _BLOLayerFn(
                     blolayer.eq_dual_params_list[i][j].value = eq_dual[j][i]
 
                 # blolayer.perturbed_problem_list[i].solve(solver=cp.GUROBI, ignore_dpp=True, warm_start=True, **{"Threads": n_threads, "OutputFlag": 0})
-                blolayer.perturbed_problem_list[i].solve(solver=cp.SCS, warm_start=True, ignore_dpp=True, max_iters=2500, eps=blolayer.backward_eps)
+                # blolayer.perturbed_problem_list[i].solve(solver=cp.SCS, warm_start=True, ignore_dpp=True, max_iters=2500, eps=blolayer.backward_eps)
+                blolayer.perturbed_problem_list[i].solve(solver=cp.OSQP, warm_start=False, verbose=False, eps_abs=1e-3, eps_rel=1e-3, max_iter=2500)
 
                 setup_time = blolayer.perturbed_problem_list[i].compilation_time
                 solve_time = blolayer.perturbed_problem_list[i].solver_stats.solve_time
