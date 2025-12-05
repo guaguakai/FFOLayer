@@ -238,7 +238,7 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, check_Q
                     cvxpy_params = cvxpy_instance["params"]
                     cvxpy_problem = cvxpy_instance["problem"]
                     cvxpy_variables = cvxpy_instance["variables"]
-                    eq_constraints = cvxpy_instance["eq_constriants"]
+                    eq_constraints = cvxpy_instance["eq_constraints"]
                     ineq_constraints = cvxpy_instance["ineq_constraints"]
                     eq_functions = cvxpy_instance["eq_functions"]
                     ineq_functions = cvxpy_instance["ineq_functions"]
@@ -255,7 +255,7 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, check_Q
                         for p_val, param_obj in zip(params_numpy, cvxpy_params):
                             param_obj.value = p_val[i]
                         
-                        cvxpy_problem.solve(solver=cp.OSQP, warm_start=False, verbose=False, eps_abs=1e-4, eps_rel=1e-4, max_iter=2500)
+                        cvxpy_problem.solve(solver=cp.OSQP, warm_start=False, verbose=False, eps_abs=1e-3, eps_rel=1e-3, max_iter=250)
                         
                         sol_i = [v.value for v in cvxpy_variables]
                         eq_i = [c.dual_value for c in eq_constraints]
@@ -281,8 +281,13 @@ def ffoqp(eps=1e-12, verbose=0, notImprovedLim=3, maxIter=20, alpha=100, check_Q
                     dtype = Q.dtype
 
                     zhats  = [torch.from_numpy(arr).to(device=device, dtype=dtype) for arr in sol_numpy][0]
-                    nus    = [torch.from_numpy(arr).to(device=device, dtype=dtype) for arr in eq_dual][0]
                     lams   = [torch.from_numpy(arr).to(device=device, dtype=dtype) for arr in ineq_dual][0]
+                    nus = [torch.from_numpy(arr).to(device=device, dtype=dtype) for arr in eq_dual]
+                    if len(nus)!=0:
+                        nus = nus[0]
+                    else:
+                        nus=lams
+                    
                     slacks = [torch.from_numpy(arr).to(device=device, dtype=dtype) for arr in ineq_slack_residual][0]
 
             elif nineq > 0:
