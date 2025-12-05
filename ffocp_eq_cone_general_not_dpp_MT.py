@@ -10,7 +10,23 @@ from cvxpylayers.torch import CvxpyLayer
 from cvxpy.constraints.second_order import SOC
 import wandb
 from utils import to_numpy, to_torch, _dump_cvxpy, n_threads, slice_params_for_batch
-from typing import Any, Dict, List
+from multiprocessing.pool import ThreadPool
+from threadpoolctl import threadpool_limits
+
+
+def _safe_copy(x):
+    """Best-effort copy for CVXPY values/duals."""
+    if x is None:
+        return None
+    if isinstance(x, (list, tuple)):
+        return [_safe_copy(y) for y in x]
+    if hasattr(x, "copy"):
+        try:
+            return x.copy()
+        except Exception:
+            pass
+    return copy(x)
+
 
 @torch.no_grad()
 def _compare_grads(params_req, grads, ground_truth_grads):
@@ -25,551 +41,432 @@ def _compare_grads(params_req, grads, ground_truth_grads):
     gt  = torch.cat(gt_chunks)
 
     eps = 1e-12
-
     denom = (est.norm() * gt.norm()).clamp_min(eps)
     cos_sim = torch.dot(est, gt) / denom
-
-    diff = (est - gt)
-    l2_diff = diff.norm()
-    # rel_l2_diff = l2_diff / gt.norm().clamp_min(eps)
+    l2_diff = (est - gt).norm()
     return cos_sim, l2_diff
 
-def _pickle_clone(obj: Any) -> Any:
-    """Deep clone with pickle/cloudpickle. Needed to avoid shared CVXPY graphs across threads."""
-    try:
-        return _pickle.loads(_pickle.dumps(obj))
-    except Exception as e:
-        raise RuntimeError(
-            "Could not clone CVXPY objects for multithreading. "
-            "Install cloudpickle or run num_threads=1."
-        ) from e
 
-
-# wrapper function for BLOLayer
 def BLOLayer(
-    problem: cp.Problem,
-    parameters,
-    variables,
+    problem_list,
+    parameters_list,
+    variables_list,
     alpha: float = 100.0,
     dual_cutoff: float = 1e-3,
     slack_tol: float = 1e-8,
     eps: float = 1e-7,
     compute_cos_sim: bool = False,
-    num_threads: int = 1,
-    backward_eps: float = 1e-7,
 ):
     """
-    Create an optimization layer that can be called like a CvxpyLayer:
-        layer = BLOLayer(...);  y = layer(*param_tensors)
+    MT-capable BLOLayer (same MT form as your attached file):
 
-    Args:
-        problem:   cvxpy.Problem with objective + constraints
-        parameters: list[cp.Parameter]
-        variables:  list[cp.Variable]
-        alpha, dual_cutoff, slack_tol, compute_cos_sim: hyperparameters for BLOLayer
+    - If `problem` is a single cvxpy.Problem (and `parameters`,`variables` are the single lists):
+      works for unbatched, or batched *serially*.
+    - If `problem` is a list/tuple of Problems (len >= runtime batch size B), and
+      `parameters` / `variables` are lists-of-lists with the same length:
+      solves each batch element in parallel via ThreadPool.
 
-    Returns:
-        A module with forward(*params, solver_args={}) -> tuple[tensor,...]
+    For MT usage:
+        problem    = [problem_0, ..., problem_{B-1}]
+        parameters = [params_0,  ..., params_{B-1}]   # each params_i is list[cp.Parameter]
+        variables  = [vars_0,    ..., vars_{B-1}]     # each vars_i   is list[cp.Variable]
     """
 
-    # Extract objective expression (ensure minimization)
-    obj = problem.objective
-    if isinstance(obj, cp.Minimize):
-        objective_expr = obj.expr
-    elif isinstance(obj, cp.Maximize):
-        objective_expr = -obj.expr  # convert to minimize
-    else:
-        objective_expr = getattr(obj, "expr", None)
-        if objective_expr is None:
-            raise ValueError("Unsupported objective type; expected Minimize/Maximize.")
+    assert len(problem_list) == len(parameters_list) == len(variables_list), \
+        "problem/parameters/variables must either be singletons or same-length lists."
 
-    eq_funcs = []
-    scalar_ineq_funcs = []
-    cone_ineq_funcs = []
-    cone_exprs = []
-    for c in problem.constraints:
-        # Equality: g(x,θ) == 0 
-        if isinstance(c, cp.constraints.zero.Equality):
-            eq_funcs.append(c.expr)
+    objective_list = []
+    eq_funcs_list = []
+    scalar_ineq_funcs_list = []
+    cone_constraints_list = []
+    cone_exprs_list = []
 
-        # Inequality: g(x,θ) <= 0
-        elif isinstance(c, cp.constraints.nonpos.Inequality):
-            scalar_ineq_funcs.append(c.expr)
-
+    for prob in problem_list:
+        obj = prob.objective
+        if isinstance(obj, cp.Minimize):
+            objective_expr = obj.expr
+        elif isinstance(obj, cp.Maximize):
+            objective_expr = -obj.expr
         else:
-            # SOCcone constraints: t, X = c.args
-            # ExpCone: args = (x, y, z)
-            # PSD: args = (X,)
-            cone_ineq_funcs.append(c)
-            flat_blocks = []
-            for arg in c.args:
-                if arg.ndim == 1:
-                    flat_blocks.append(arg)
-                else:
-                    flat_blocks.append(cp.vec(arg))  # flatten to 1D
-            g_expr = cp.hstack(flat_blocks)
-            cone_exprs.append(g_expr)
+            objective_expr = getattr(obj, "expr", None)
+            if objective_expr is None:
+                raise ValueError("Unsupported objective type; expected Minimize/Maximize.")
+
+        eq_funcs = []
+        scalar_ineq_funcs = []
+        cone_constraints = []
+        cone_exprs = []
+
+        for c in prob.constraints:
+            if isinstance(c, cp.constraints.zero.Equality):
+                eq_funcs.append(c.expr)
+            elif isinstance(c, cp.constraints.nonpos.Inequality):
+                scalar_ineq_funcs.append(c.expr)
+            else:
+                cone_constraints.append(c)
+                flat_blocks = []
+                for arg in c.args:
+                    if arg.ndim == 1:
+                        flat_blocks.append(arg)
+                    else:
+                        flat_blocks.append(cp.vec(arg))
+                cone_exprs.append(cp.hstack(flat_blocks))
+
+        objective_list.append(objective_expr)
+        eq_funcs_list.append(eq_funcs)
+        scalar_ineq_funcs_list.append(scalar_ineq_funcs)
+        cone_constraints_list.append(cone_constraints)
+        cone_exprs_list.append(cone_exprs)
 
     return _BLOLayer(
-        objective=objective_expr,
-        eq_functions=eq_funcs,
-        scalar_ineq_functions=scalar_ineq_funcs,
-        cone_constraints=cone_ineq_funcs,
-        cone_exprs=cone_exprs,
-        parameters=parameters,
-        variables=variables,
+        objective_list=objective_list,
+        eq_functions_list=eq_funcs_list,
+        scalar_ineq_functions_list=scalar_ineq_funcs_list,
+        cone_constraints_list=cone_constraints_list,
+        cone_exprs_list=cone_exprs_list,
+        parameters_list=parameters_list,
+        variables_list=variables_list,
         alpha=alpha,
         dual_cutoff=dual_cutoff,
         slack_tol=slack_tol,
-        eps=eps,   
-        backward_eps=backward_eps,
-        num_threads=num_threads,
+        eps=eps,
         _compute_cos_sim=compute_cos_sim,
     )
 
+
 class _BLOLayer(torch.nn.Module):
-    """A differentiable convex optimization layer
+    def __init__(
+        self,
+        objective_list,
+        eq_functions_list,
+        scalar_ineq_functions_list,
+        cone_constraints_list,
+        cone_exprs_list,
+        parameters_list,
+        variables_list,
+        alpha,
+        dual_cutoff,
+        slack_tol,
+        eps,
+        _compute_cos_sim=False,
+    ):
+        super().__init__()
 
-    A BLOLayer solves a parametrized convex optimization problem given by a
-    CVXPY problem. It solves the problem in its forward pass, and it computes
-    the derivative of problem's solution map with respect to the parameters in
-    its backward pass. The CVPXY problem must be a disciplined parametrized
-    program.
+        self.num_copies = len(objective_list)
+        assert self.num_copies == len(eq_functions_list) == len(scalar_ineq_functions_list) == len(cone_constraints_list) \
+               == len(cone_exprs_list) == len(parameters_list) == len(variables_list)
 
-    Example usage:
-        ```
-        import cvxpy as cp
-        import torch
-        from blolayers.torch import BLOLayer
+        self.objective_list = objective_list
+        self.eq_functions_list = eq_functions_list
+        self.scalar_ineq_functions_list = scalar_ineq_functions_list
+        self.cone_constraints_list = cone_constraints_list
+        self.cone_exprs_list = cone_exprs_list
 
-        n, m = 2, 3
-        x = cp.Variable(n)
-        A = cp.Parameter((m, n))
-        b = cp.Parameter(m)
-        eq_constraints = [x = 0]
-        ineq_constriants = [x >= 0
-        objective = cp.Minimize(0.5 * cp.pnorm(A @ x - b, p=1))
-        problem = cp.Problem(objective, eq_constraints + ineq_constraints)
-        assert problem.is_dpp()
+        self.param_order_list = parameters_list
+        self.variables_list = variables_list
 
-        blolayer = BLOLayer(problem, parameters=[A, b], variables=[x])
-        A_tch = torch.randn(m, n, requires_grad=True)
-        b_tch = torch.randn(m, requires_grad=True)
-
-        # solve the problem
-        solution, = blolayer(A_tch, b_tch)
-
-        # compute the gradient of the sum of the solution with respect to A, b
-        solution.sum().backward()
-        ```
-    """
-
-    def __init__(self, objective, eq_functions, scalar_ineq_functions, cone_constraints, cone_exprs, parameters, variables, alpha, dual_cutoff, slack_tol, eps, backward_eps, num_threads, _compute_cos_sim=False):
-        """Construct a BLOLayer
-
-        Args:
-          objective: a CVXPY Objective object defining the objective of the
-                     problem.
-          eq_functions: a list of CVXPY Constraint objects defining the problem.
-          ineq_functions: a list of CVXPY Constraint objects defining the problem.
-          parameters: A list of CVXPY Parameters in the problem; the order
-                      of the Parameters determines the order in which parameter
-                      values must be supplied in the forward pass. Must include
-                      every parameter involved in problem.
-          variables: A list of CVXPY Variables in the problem; the order of the
-                     Variables determines the order of the optimal variable
-                     values returned from the forward pass.
-        """
-        super(_BLOLayer, self).__init__()
-        
-        self.objective = objective
-        self.eq_functions = eq_functions
-        self.scalar_ineq_functions = scalar_ineq_functions
-        self.cone_constraints = cone_constraints
-        self.cone_exprs = cone_exprs
-
-        self.param_order = parameters
-        self.variables = variables
-        self.alpha = alpha
-        self.dual_cutoff = dual_cutoff
-        self.slack_tol = float(slack_tol) 
+        self.alpha = float(alpha)
+        self.dual_cutoff = float(dual_cutoff)
+        self.slack_tol = float(slack_tol)
+        self.eps = float(eps)
         self._compute_cos_sim = _compute_cos_sim
-        self.num_threads = num_threads
-        self.eps = eps
-        self.backward_eps = backward_eps
 
-        self.eq_constraints = [f == 0 for f in self.eq_functions]
-        self.scalar_ineq_constraints = [g <= 0 for g in self.scalar_ineq_functions]
-        self.problem = cp.Problem(cp.Minimize(objective), self.eq_constraints + self.scalar_ineq_constraints + self.cone_constraints)
-
-        self.dvar_params = [cp.Parameter(shape=v.shape) for v in self.variables]
-        self.eq_dual_params = [
-            cp.Parameter(shape=f.shape) for f in self.eq_functions
-        ]
-        self.scalar_ineq_dual_params = [
-            cp.Parameter(shape=g.shape, nonneg=True) for g in self.scalar_ineq_functions
-        ]
-
-        self.scalar_active_mask_params = [
-            cp.Parameter(shape=g.shape, nonneg=True) for g in self.scalar_ineq_functions
-        ]
-
-         # cone's related parameters
-        self.cone_dual_params = [
-            cp.Parameter(shape=g.shape) for g in self.cone_exprs
-        ]
-        self.cone_primal_star = [
-            cp.Parameter(shape=g.shape) for g in self.cone_exprs
-        ]
-        self.cone_active_mask = [
-            cp.Parameter(nonneg=True) for _ in self.cone_exprs
-        ]
-
-        vars_dvars_product = cp.sum([
-            cp.sum(cp.multiply(dv, v))
-            for dv, v in zip(self.dvar_params, self.variables)
-        ])
-        scalar_ineq_dual_product = cp.sum([
-            cp.sum(cp.multiply(lm, g))
-            for lm, g in zip(self.scalar_ineq_dual_params,
-                             self.scalar_ineq_functions)
-        ])
-        cone_dual_product = cp.sum([
-            cp.sum(cp.multiply(y, g))
-            for y, g in zip(self.cone_dual_params, self.cone_exprs)
-        ])
-
-        self.new_objective = (1.0 / self.alpha) * vars_dvars_product \
-                             + self.objective + scalar_ineq_dual_product + cone_dual_product
-
-        self.active_eq_constraints = []
-
-        print("new_objective DPP?", self.new_objective.is_dcp(dpp=True))
-
-        print("vars_dvars_product DPP?", vars_dvars_product.is_dcp(dpp=True))
-        # print("scalar_ineq_dual_product DPP?", scalar_ineq_dual_product.is_dcp(dpp=True))
-        # print("cone_dual_product DPP?", cone_dual_product.is_dcp(dpp=True))
-
-        # 1) scalar：mask * g(x) == 0
-        for j, g in enumerate(self.scalar_ineq_functions):
-            self.active_eq_constraints.append(
-                cp.multiply(self.scalar_active_mask_params[j], g) == 0
+        # base problems
+        self.eq_constraints_list = [[f == 0 for f in eqs] for eqs in self.eq_functions_list]
+        self.scalar_ineq_constraints_list = [[g <= 0 for g in gs] for gs in self.scalar_ineq_functions_list]
+        self.problem_list = [
+            cp.Problem(
+                cp.Minimize(self.objective_list[i]),
+                self.eq_constraints_list[i]
+                + self.scalar_ineq_constraints_list[i]
+                + self.cone_constraints_list[i],
             )
-            print("active_eq_constraints[j] DPP?", self.active_eq_constraints[j].is_dcp(dpp=True))
-        # 2) cone：mask * <dual, g(x)-g*> == 0
-        for j, g in enumerate(self.cone_exprs):
-            dual_param = self.cone_dual_params[j]
-            g_star_param = self.cone_primal_star[j]
-            lin = cp.sum(cp.multiply(dual_param, g - g_star_param))
-            self.active_eq_constraints.append(
-                self.cone_active_mask[j] * lin == 0
-            )
-            print("active_eq_constraints[j] DPP?", self.active_eq_constraints[j].is_dcp(dpp=True))
+            for i in range(self.num_copies)
+        ]
 
-        self.perturbed_problem = cp.Problem(
-            cp.Minimize(self.new_objective),
-            self.eq_constraints + self.active_eq_constraints
-        )
-       
-        print("perturbed_problem is_dcp:", self.perturbed_problem.is_dcp())
-        print("perturbed_problem is_dpp:", self.perturbed_problem.is_dpp())
+        # parameters for perturbation + KKT selection
+        self.dvar_params_list = [[cp.Parameter(shape=v.shape) for v in self.variables_list[i]] for i in range(self.num_copies)]
+        self.eq_dual_params_list = [[cp.Parameter(shape=f.shape) for f in self.eq_functions_list[i]] for i in range(self.num_copies)]
+        self.scalar_ineq_dual_params_list = [
+            [cp.Parameter(shape=g.shape, nonneg=True) for g in self.scalar_ineq_functions_list[i]]
+            for i in range(self.num_copies)
+        ]
+        self.scalar_active_mask_params_list = [
+            [cp.Parameter(shape=g.shape, nonneg=True) for g in self.scalar_ineq_functions_list[i]]
+            for i in range(self.num_copies)
+        ]
 
-        phi_expr = self.objective \
-            + cp.sum([
-                cp.sum(cp.multiply(du, f))
-                for du, f in zip(self.eq_dual_params, self.eq_functions)
-            ]) \
-            + cp.sum([
-                cp.sum(cp.multiply(du, g))
-                for du, g in zip(self.scalar_ineq_dual_params,
-                                 self.scalar_ineq_functions)
-            ]) \
-            + cp.sum([
-                cp.sum(cp.multiply(du, g))
-                for du, g in zip(self.cone_dual_params, self.cone_exprs)
+        self.cone_dual_params_list = [
+            [cp.Parameter(shape=g.shape) for g in self.cone_exprs_list[i]]
+            for i in range(self.num_copies)
+        ]
+        self.cone_primal_star_list = [
+            [cp.Parameter(shape=g.shape) for g in self.cone_exprs_list[i]]
+            for i in range(self.num_copies)
+        ]
+        self.cone_active_mask_list = [
+            [cp.Parameter(nonneg=True) for _ in self.cone_exprs_list[i]]
+            for i in range(self.num_copies)
+        ]
+
+        # new objective (per copy)
+        self.new_objective_list = []
+        self.active_eq_constraints_list = []
+        self.perturbed_problem_list = []
+
+        for i in range(self.num_copies):
+            vars_dvars_product = cp.sum([
+                cp.sum(cp.multiply(dv, v))
+                for dv, v in zip(self.dvar_params_list[i], self.variables_list[i])
+            ])
+            scalar_ineq_dual_product = cp.sum([
+                cp.sum(cp.multiply(lm, g))
+                for lm, g in zip(self.scalar_ineq_dual_params_list[i], self.scalar_ineq_functions_list[i])
+            ])
+            cone_dual_product = cp.sum([
+                cp.sum(cp.multiply(y, g))
+                for y, g in zip(self.cone_dual_params_list[i], self.cone_exprs_list[i])
             ])
 
+            new_obj = (1.0 / self.alpha) * vars_dvars_product + self.objective_list[i] + scalar_ineq_dual_product + cone_dual_product
+            self.new_objective_list.append(new_obj)
+
+            active_eqs = []
+            # scalar: mask * g(x) == 0
+            for j, g in enumerate(self.scalar_ineq_functions_list[i]):
+                active_eqs.append(cp.multiply(self.scalar_active_mask_params_list[i][j], g) == 0)
+
+            # cone: mask * <y*, g(x) - g*> == 0
+            for j, g in enumerate(self.cone_exprs_list[i]):
+                dual_param = self.cone_dual_params_list[i][j]
+                g_star_param = self.cone_primal_star_list[i][j]
+                lin = cp.sum(cp.multiply(dual_param, g - g_star_param))
+                active_eqs.append(self.cone_active_mask_list[i][j] * lin == 0)
+
+            self.active_eq_constraints_list.append(active_eqs)
+
+            self.perturbed_problem_list.append(
+                cp.Problem(
+                    cp.Minimize(self.new_objective_list[i]),
+                    self.eq_constraints_list[i] + self.active_eq_constraints_list[i],
+                )
+            )
+
+        # phi torch expression (compile once; shapes match across copies)
         self.phi_torch = TorchExpression(
-            phi_expr,
+            self.objective_list[0]
+            + cp.sum([cp.sum(cp.multiply(du, f)) for du, f in zip(self.eq_dual_params_list[0], self.eq_functions_list[0])])
+            + cp.sum([cp.sum(cp.multiply(du, g)) for du, g in zip(self.scalar_ineq_dual_params_list[0], self.scalar_ineq_functions_list[0])])
+            + cp.sum([cp.sum(cp.multiply(du, g)) for du, g in zip(self.cone_dual_params_list[0], self.cone_exprs_list[0])]),
             provided_vars_list=[
-                *self.variables,
-                *self.param_order,
-                *self.eq_dual_params,
-                *self.scalar_ineq_dual_params,
-                *self.cone_dual_params,
+                *self.variables_list[0],
+                *self.param_order_list[0],
+                *self.eq_dual_params_list[0],
+                *self.scalar_ineq_dual_params_list[0],
+                *self.cone_dual_params_list[0],
             ],
         ).torch_expression
 
+        print("new_objective DPP? (copy0)", self.new_objective_list[0].is_dcp(dpp=True))
+        print("perturbed_problem is_dcp (copy0):", self.perturbed_problem_list[0].is_dcp())
+        print("perturbed_problem is_dpp (copy0):", self.perturbed_problem_list[0].is_dpp())
+
         self.forward_setup_time = 0
-        self.backward_setup_time = 0
         self.forward_solve_time = 0
+        self.backward_setup_time = 0
         self.backward_solve_time = 0
 
-        # --- Multi-thread slot structure (one independent cvxpy graph per batch element i) ---
-        self._slots_lock = threading.Lock()
-        self._slots = []  # list[dict] of independent cvxpy objects
-
-        # pickle a *single dict* that contains all cvxpy objects that must stay consistent together
-        slot_template = dict(
-            problem=self.problem,
-            perturbed_problem=self.perturbed_problem,
-            param_order=self.param_order,
-            variables=self.variables,
-            eq_constraints=self.eq_constraints,
-            scalar_ineq_constraints=self.scalar_ineq_constraints,
-            cone_constraints=self.cone_constraints,
-            eq_functions=self.eq_functions,
-            scalar_ineq_functions=self.scalar_ineq_functions,
-            cone_exprs=self.cone_exprs,
-            active_eq_constraints=self.active_eq_constraints,
-            dvar_params=self.dvar_params,
-            eq_dual_params=self.eq_dual_params,
-            scalar_ineq_dual_params=self.scalar_ineq_dual_params,
-            scalar_active_mask_params=self.scalar_active_mask_params,
-            cone_dual_params=self.cone_dual_params,
-            cone_primal_star=self.cone_primal_star,
-            cone_active_mask=self.cone_active_mask,
-        )
-        self._slot_template_blob = _pickle.dumps(slot_template)
-
-        def _clone_slot():
-            # IMPORTANT: unpickle the *whole dict* so internal references are consistent
-            return _pickle.loads(self._slot_template_blob)
-
-        self._clone_slot = _clone_slot  # store callable
-
     def forward(self, *params, solver_args={}):
-        """Solve problem (or a batch of problems) corresponding to `params`
-
-        Args:
-          params: a sequence of torch Tensors; the n-th Tensor specifies
-                  the value for the n-th CVXPY Parameter. These Tensors
-                  can be batched: if a Tensor has 3 dimensions, then its
-                  first dimension is interpreted as the batch size. These
-                  Tensors must all have the same dtype and device.
-          solver_args: a dict of optional arguments, to send to `diffcp`. Keys
-                       should be the names of keyword arguments.
-
-        Returns:
-          a list of optimal variable values, one for each CVXPY Variable
-          supplied to the constructor.
-        """
         if solver_args is None:
             solver_args = {}
-        elif solver_args.get("solver") == cp.SCS:
+        default_solver_args = {"ignore_dpp": True}
+        if solver_args.get("solver") == cp.SCS:
             default_solver_args = dict(
                 solver=cp.SCS,
                 warm_start=False,
-                ignore_dpp=False,
+                ignore_dpp=True,
                 max_iters=2500,
                 eps=self.eps,
             )
-        else:
-            default_solver_args = {"ignore_dpp": False}
         solver_args = {**default_solver_args, **solver_args}
-        
+
         info = {}
-        f = _BLOLayerFn(
-            blolayer=self,
-            solver_args=solver_args,
-            _compute_cos_sim=self._compute_cos_sim,
-            info=info
-        )
+        f = _BLOLayerFn(self, solver_args=solver_args, _compute_cos_sim=self._compute_cos_sim, info=info)
         sol = f(*params)
         self.info = info
         return sol
 
-def _BLOLayerFn(
-        blolayer,
-        solver_args,
-        _compute_cos_sim,
-        info):
+
+def _BLOLayerFn(blolayer, solver_args, _compute_cos_sim, info):
     class _BLOLayerFnFn(torch.autograd.Function):
         @staticmethod
         def forward(ctx, *params):
-            # infer dtype, device, and whether or not params are batched
             ctx.dtype = params[0].dtype
             ctx.device = params[0].device
             ctx.solver_args = solver_args
 
+            # infer batch sizes from copy0 parameter shapes
             ctx.batch_sizes = []
-            for i, (p, q) in enumerate(zip(params, blolayer.param_order)):
-                # check dtype, device of params
+            for i, (p, q) in enumerate(zip(params, blolayer.param_order_list[0])):
                 if p.dtype != ctx.dtype:
                     raise ValueError(
-                        "Two or more parameters have different dtypes. "
-                        "Expected parameter %d to have dtype %s but "
-                        "got dtype %s." %
-                        (i, str(ctx.dtype), str(p.dtype))
+                        "Two or more parameters have different dtypes. Expected parameter %d to have dtype %s but got %s."
+                        % (i, str(ctx.dtype), str(p.dtype))
                     )
                 if p.device != ctx.device:
                     raise ValueError(
-                        "Two or more parameters are on different devices. "
-                        "Expected parameter %d to be on device %s "
-                        "but got device %s." %
-                        (i, str(ctx.device), str(p.device))
+                        "Two or more parameters are on different devices. Expected parameter %d to be on %s but got %s."
+                        % (i, str(ctx.device), str(p.device))
                     )
 
-                # check and extract the batch size for the parameter
-                # 0 means there is no batch dimension for this parameter
-                # and we assume the batch dimension is non-zero
                 if p.ndimension() == q.ndim:
                     batch_size = 0
                 elif p.ndimension() == q.ndim + 1:
                     batch_size = p.size(0)
                     if batch_size == 0:
-                        raise ValueError(
-                            "The batch dimension for parameter {} is zero "
-                            "but should be non-zero.".format(i))
+                        raise ValueError(f"The batch dimension for parameter {i} is zero but should be non-zero.")
                 else:
                     raise ValueError(
-                        "Invalid parameter size passed in. Expected "
-                        "parameter {} to have have {} or {} dimensions "
-                        "but got {} dimensions".format(
-                            i, q.ndim, q.ndim + 1, p.ndimension()))
+                        f"Invalid parameter size passed in. Expected parameter {i} to have {q.ndim} or {q.ndim+1} dims but got {p.ndimension()}."
+                    )
 
                 ctx.batch_sizes.append(batch_size)
-
-                # validate the parameter shape
                 p_shape = p.shape if batch_size == 0 else p.shape[1:]
-                if not np.all(p_shape == blolayer.param_order[i].shape):
-                    raise ValueError(
-                        "Inconsistent parameter shapes passed in. "
-                        "Expected parameter {} to have non-batched shape of "
-                        "{} but got {}.".format(
-                                i,
-                                q.shape,
-                                p.shape))
+                if not np.all(p_shape == blolayer.param_order_list[0][i].shape):
+                    raise ValueError(f"Inconsistent parameter shapes passed in for param {i}.")
 
             ctx.batch_sizes = np.array(ctx.batch_sizes)
             ctx.batch = np.any(ctx.batch_sizes > 0)
-
             if ctx.batch:
-                nonzero_batch_sizes = ctx.batch_sizes[ctx.batch_sizes > 0]
-                ctx.batch_size = nonzero_batch_sizes[0]
-                if np.any(nonzero_batch_sizes != ctx.batch_size):
-                    raise ValueError(
-                        "Inconsistent batch sizes passed in. Expected "
-                        "parameters to have no batch size or all the same "
-                        "batch size but got sizes: {}.".format(
-                            ctx.batch_sizes))
+                nonzero = ctx.batch_sizes[ctx.batch_sizes > 0]
+                ctx.batch_size = int(nonzero[0])
+                if np.any(nonzero != ctx.batch_size):
+                    raise ValueError(f"Inconsistent batch sizes: {ctx.batch_sizes}.")
             else:
                 ctx.batch_size = 1
-            
+
             B = ctx.batch_size
+            ctx.params = params
 
-            # convert to numpy arrays
             params_numpy = [to_numpy(p) for p in params]
+            ctx.params_numpy = params_numpy
 
-            sol_numpy = [np.empty((B,) + v.shape, dtype=float) for v in blolayer.variables]
-            eq_dual = [np.empty((B,) + f.shape, dtype=float) for f in blolayer.eq_functions]
+            # allocate buffers off copy0 shapes
+            sol_numpy = [np.empty((B,) + v.shape, dtype=float) for v in blolayer.variables_list[0]]
+            eq_dual = [np.empty((B,) + f.shape, dtype=float) for f in blolayer.eq_functions_list[0]]
+            scalar_ineq_dual = [np.empty((B,) + g.shape, dtype=float) for g in blolayer.scalar_ineq_functions_list[0]]
+            scalar_ineq_slack = [np.empty((B,) + g.shape, dtype=float) for g in blolayer.scalar_ineq_functions_list[0]]
+            cone_primal_vals = [np.empty((B,) + g.shape, dtype=float) for g in blolayer.cone_exprs_list[0]]
+            cone_dual_vals = [np.empty((B,) + g.shape, dtype=float) for g in blolayer.cone_exprs_list[0]]
 
-            scalar_ineq_dual = [
-                np.empty((B,) + g.shape, dtype=float)
-                for g in blolayer.scalar_ineq_functions
-            ]
-            scalar_ineq_slack = [
-                np.empty((B,) + g.shape, dtype=float)
-                for g in blolayer.scalar_ineq_functions
-            ]
-            cone_primal_vals = [
-                np.empty((B,) + g.shape, dtype=float)
-                for g in blolayer.cone_exprs
-            ]
-            cone_dual_vals = [
-                np.empty((B,) + g.shape, dtype=float)
-                for g in blolayer.cone_exprs
-            ]
+            def _flatten_cone_dual(dv_raw, g_shape):
+                if isinstance(dv_raw, (list, tuple)):
+                    flat_chunks = []
+                    for part in dv_raw:
+                        part_arr = np.asarray(part, dtype=float).reshape(-1)
+                        flat_chunks.append(part_arr)
+                    dv_flat = np.concatenate(flat_chunks, axis=0)
+                else:
+                    dv_flat = np.asarray(dv_raw, dtype=float).reshape(-1)
+
+                n_expected = int(np.prod(g_shape))
+                if dv_flat.size != n_expected:
+                    raise RuntimeError(f"cone dual size mismatch: got {dv_flat.size}, expected {n_expected}")
+                return dv_flat.reshape(g_shape)
 
             def _solve_one_forward(i):
-                slot = blolayer._slots[i]
-
-                # pick params for this batch element
+                slot = i  # MT form: one copy per batch element
                 if ctx.batch:
-                    params_numpy_i = [p[i] if bs > 0 else p for p, bs in zip(params_numpy, ctx.batch_sizes)]
+                    params_i = [p[i] if bs > 0 else p for p, bs in zip(params_numpy, ctx.batch_sizes)]
                 else:
-                    params_numpy_i = params_numpy
+                    params_i = params_numpy
 
-                # assign into slot parameters
-                for p_val, q in zip(params_numpy_i, slot["param_order"]):
-                    q.value = p_val
+                for p_val, param_obj in zip(params_i, blolayer.param_order_list[slot]):
+                    param_obj.value = p_val
 
                 try:
-                    slot["problem"].solve(**ctx.solver_args)
+                    blolayer.problem_list[slot].solve(**ctx.solver_args)
                 except Exception:
-                    slot["problem"].solve(solver=cp.OSQP, warm_start=False, verbose=False)
+                    print("Forward pass SCS failed, using OSQP")
+                    exit()
+                    blolayer.problem_list[slot].solve(solver=cp.OSQP, warm_start=False, verbose=False)
 
-                st = slot["problem"].status
+                st = blolayer.problem_list[slot].status
                 if st not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
-                    raise RuntimeError(f"Forward status={st}")
+                    raise RuntimeError(f"Forward problem status = {st}")
 
-                sol_i = [np.array(v.value, dtype=float) for v in slot["variables"]]
-                eq_dual_i = [np.array(c.dual_value, dtype=float) for c in slot["eq_constraints"]]
+                sol_vals = [v.value for v in blolayer.variables_list[slot]]
+                eq_vals = [c.dual_value for c in blolayer.eq_constraints_list[slot]]
+                sinq_vals = [c.dual_value for c in blolayer.scalar_ineq_constraints_list[slot]]
+                slack_vals = [np.maximum(-expr.value, 0.0) for expr in blolayer.scalar_ineq_functions_list[slot]]
+                cone_g_vals = [np.asarray(expr.value, dtype=float) for expr in blolayer.cone_exprs_list[slot]]
+                cone_y_vals = [
+                    _flatten_cone_dual(c.dual_value, blolayer.cone_exprs_list[slot][j].shape)
+                    for j, c in enumerate(blolayer.cone_constraints_list[slot])
+                ]
 
-                scalar_dual_i, scalar_slack_i = [], []
-                for j, g_expr in enumerate(slot["scalar_ineq_functions"]):
-                    g_val = np.array(g_expr.value, dtype=float)
-                    scalar_dual_i.append(np.array(slot["scalar_ineq_constraints"][j].dual_value, dtype=float))
-                    scalar_slack_i.append(np.maximum(-g_val, 0.0))
+                setup_time = getattr(blolayer.problem_list[slot], "compilation_time", 0.0) or 0.0
+                solve_time = getattr(getattr(blolayer.problem_list[slot], "solver_stats", None), "solve_time", 0.0) or 0.0
+                return sol_vals, eq_vals, sinq_vals, slack_vals, cone_g_vals, cone_y_vals, setup_time, solve_time
 
-                cone_primal_i = [np.array(g.value, dtype=float) for g in slot["cone_exprs"]]
-
-                cone_dual_i = []
-                for j, c in enumerate(slot["cone_constraints"]):
-                    dv_raw = c.dual_value
-                    if isinstance(dv_raw, (list, tuple)):
-                        dv_flat = np.concatenate([np.asarray(part, dtype=float).reshape(-1) for part in dv_raw], axis=0)
-                    else:
-                        dv_flat = np.asarray(dv_raw, dtype=float).reshape(-1)
-
-                    g_shape = slot["cone_exprs"][j].shape
-                    n_expected = int(np.prod(g_shape))
-                    if dv_flat.size != n_expected:
-                        raise RuntimeError(f"cone dual size mismatch at {j}: got {dv_flat.size}, expected {n_expected}")
-
-                    cone_dual_i.append(dv_flat.reshape(g_shape))
-
-                stats = slot["problem"].solver_stats
-                setup_t = getattr(stats, "setup_time", 0.0) or 0.0
-                solve_t = getattr(stats, "solve_time", 0.0) or 0.0
-                return sol_i, eq_dual_i, scalar_dual_i, scalar_slack_i, cone_primal_i, cone_dual_i, setup_t, solve_t
-
-            if B == 1 or n_threads <= 1:
-                results = [_solve_one_forward(0)]
-            else:
+            use_mt = (ThreadPool is not None) and (B > 1) and (blolayer.num_copies >= B)
+            if use_mt:
                 with threadpool_limits(limits=1):
                     pool = ThreadPool(processes=min(B, n_threads))
                     try:
                         results = pool.map(_solve_one_forward, range(B))
                     finally:
                         pool.close()
-                        # pool.join()
+            else:
+                # serial fallback (still supports B>1 if you only provided 1 copy)
+                results = []
+                for i in range(B):
+                    slot = 0 if blolayer.num_copies == 1 else i
+                    if ctx.batch:
+                        params_i = [p[i] if bs > 0 else p for p, bs in zip(params_numpy, ctx.batch_sizes)]
+                    else:
+                        params_i = params_numpy
+                    for p_val, param_obj in zip(params_i, blolayer.param_order_list[slot]):
+                        param_obj.value = p_val
+                    try:
+                        blolayer.problem_list[slot].solve(**ctx.solver_args)
+                    except Exception:
+                        blolayer.problem_list[slot].solve(solver=cp.OSQP, warm_start=False, verbose=False)
 
-            # write results into preallocated arrays
-            avg_setup = 0.0
-            avg_solve = 0.0
-            for i, (sol_i, eq_i, ineq_i, slack_i, cone_p_i, cone_d_i, setup_i, solve_i) in enumerate(results):
-                avg_setup += setup_i
-                avg_solve += solve_i
+                    st = blolayer.problem_list[slot].status
+                    if st not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
+                        raise RuntimeError(f"Forward problem status = {st}")
 
-                for v_id in range(len(blolayer.variables)):
+                    sol_vals = [v.value for v in blolayer.variables_list[slot]]
+                    eq_vals = [c.dual_value for c in blolayer.eq_constraints_list[slot]]
+                    sinq_vals = [c.dual_value for c in blolayer.scalar_ineq_constraints_list[slot]]
+                    slack_vals = [np.maximum(-expr.value, 0.0) for expr in blolayer.scalar_ineq_functions_list[slot]]
+                    cone_g_vals = [np.asarray(expr.value, dtype=float) for expr in blolayer.cone_exprs_list[slot]]
+                    cone_y_vals = [
+                        _flatten_cone_dual(c.dual_value, blolayer.cone_exprs_list[slot][j].shape)
+                        for j, c in enumerate(blolayer.cone_constraints_list[slot])
+                    ]
+                    setup_time = getattr(blolayer.problem_list[slot], "compilation_time", 0.0) or 0.0
+                    solve_time = getattr(getattr(blolayer.problem_list[slot], "solver_stats", None), "solve_time", 0.0) or 0.0
+                    results.append((sol_vals, eq_vals, sinq_vals, slack_vals, cone_g_vals, cone_y_vals, setup_time, solve_time))
+
+            avg_setup_time, avg_solve_time = 0.0, 0.0
+            for i, (sol_i, eq_i, sinq_i, slack_i, cone_g_i, cone_y_i, setup_t, solve_t) in enumerate(results):
+                for v_id in range(len(sol_numpy)):
                     sol_numpy[v_id][i, ...] = sol_i[v_id]
-
-                for c_id in range(len(blolayer.eq_constraints)):
+                for c_id in range(len(eq_dual)):
                     eq_dual[c_id][i, ...] = eq_i[c_id]
-
-                for j in range(len(blolayer.scalar_ineq_functions)):
-                    scalar_ineq_dual[j][i, ...] = ineq_i[j]
+                for j in range(len(scalar_ineq_dual)):
+                    scalar_ineq_dual[j][i, ...] = sinq_i[j]
                     scalar_ineq_slack[j][i, ...] = slack_i[j]
+                for j in range(len(cone_primal_vals)):
+                    cone_primal_vals[j][i, ...] = cone_g_i[j]
+                    cone_dual_vals[j][i, ...] = cone_y_i[j]
+                avg_setup_time += setup_t
+                avg_solve_time += solve_t
 
-                for j in range(len(blolayer.cone_exprs)):
-                    cone_primal_vals[j][i, ...] = cone_p_i[j]
-                    cone_dual_vals[j][i, ...] = cone_d_i[j]
-
-            if B > 0:
-                avg_setup /= B
-                avg_solve /= B
-            print(f"[MT forward] avg setup={avg_setup:.6f}, avg solve={avg_solve:.6f}")
+            info["forward_setup_time"] = avg_setup_time / max(1, B)
+            info["forward_solve_time"] = avg_solve_time / max(1, B)
 
             ctx.sol_numpy = sol_numpy
             ctx.eq_dual = eq_dual
@@ -577,49 +474,31 @@ def _BLOLayerFn(
             ctx.scalar_ineq_slack = scalar_ineq_slack
             ctx.cone_primal_vals = cone_primal_vals
             ctx.cone_dual_vals = cone_dual_vals
-
-            ctx.params_numpy = params_numpy
-            ctx.params = params
             ctx.blolayer = blolayer
 
-            ctx._warm_vars = [copy(v.value) for v in blolayer.variables]
-            if len(blolayer.eq_constraints) > 0:
-                ctx._warm_eq_duals = [copy(c.dual_value) for c in blolayer.eq_constraints]
-            ctx._warm_ineq_duals = [copy(c.dual_value) for c in blolayer.scalar_ineq_constraints]
-            ctx._warm_ineq_slack_residuals = [copy(c.value) for c in blolayer.scalar_ineq_functions]
+            # warm starts (values only)
+            ctx._warm_vars_list = [[_safe_copy(sol_numpy[k][i, ...]) for k in range(len(sol_numpy))] for i in range(B)]
 
             sol_torch = [to_torch(arr, ctx.dtype, ctx.device) for arr in sol_numpy]
-
             return tuple(sol_torch)
 
         @staticmethod
         def backward(ctx, *dvars):
-            backward_start_time = time.time()
-
-            # convert to numpy arrays
-            dvars_numpy = [to_numpy(dvar) for dvar in dvars]
-            
-            # temperature = 10
-            # ineq_dual_tanh = [np.tanh(dual * temperature) for dual in ctx.ineq_dual]
-
             blolayer = ctx.blolayer
             B = ctx.batch_size
+
+            dvars_numpy = [to_numpy(dvar) for dvar in dvars]
             sol_numpy = ctx.sol_numpy
             eq_dual = ctx.eq_dual
             scalar_ineq_dual = ctx.scalar_ineq_dual
             scalar_ineq_slack = ctx.scalar_ineq_slack
             cone_primal_vals = ctx.cone_primal_vals
             cone_dual_vals = ctx.cone_dual_vals
-            
-            y_dim = dvars_numpy[0].shape[1]
-            if len(eq_dual) == 0:
-                num_eq = 0
-            else:
-                num_eq = eq_dual[0].shape[1]
 
-            params_numpy = ctx.params_numpy
+            num_scalar_ineq = len(blolayer.scalar_ineq_functions_list[0])
+            num_cones = len(blolayer.cone_exprs_list[0])
 
-            backward_start_time2 = time.time()
+            # prepare grad inputs
             params_req, req_grad_mask = [], []
             for p in ctx.params:
                 q = p.detach().clone()
@@ -627,22 +506,20 @@ def _BLOLayerFn(
                 q.requires_grad_(req_grad)
                 params_req.append(q)
                 req_grad_mask.append(req_grad)
-            
 
             if _compute_cos_sim:
-                # compute ground truth gradient using cvxpylayer
                 cvxpylayer_problem = cp.Problem(
-                    cp.Minimize(blolayer.objective),
+                    cp.Minimize(blolayer.objective_list[0]),
                     constraints=(
-                        blolayer.eq_constraints
-                        + blolayer.scalar_ineq_constraints
-                        + blolayer.cone_constraints
+                        blolayer.eq_constraints_list[0]
+                        + blolayer.scalar_ineq_constraints_list[0]
+                        + blolayer.cone_constraints_list[0]
                     ),
                 )
                 _cvx_layer = CvxpyLayer(
                     cvxpylayer_problem,
-                    parameters=blolayer.param_order,
-                    variables=blolayer.variables,
+                    parameters=blolayer.param_order_list[0],
+                    variables=blolayer.variables_list[0],
                 )
                 with torch.enable_grad():
                     sol_tensors = _cvx_layer(*params_req)
@@ -650,7 +527,6 @@ def _BLOLayerFn(
                     sol_tensors = (sol_tensors,)
                 grad_outputs = [torch.zeros_like(out) if gv is None else gv for out, gv in zip(sol_tensors, dvars)]
                 inputs_for_grad = tuple(q for q, need in zip(params_req, req_grad_mask) if need)
-
                 ground_truth_grads = torch.autograd.grad(
                     outputs=tuple(sol_tensors),
                     inputs=inputs_for_grad,
@@ -659,58 +535,42 @@ def _BLOLayerFn(
                     retain_graph=False,
                 )
 
-            new_sol_lagrangian = [np.empty_like(sol_numpy[k]) for k in range(len(blolayer.variables))]
-            new_eq_dual = [np.empty_like(eq_dual[k]) for k in range(len(blolayer.eq_constraints))]
-            num_scalar_ineq = len(blolayer.scalar_ineq_functions)
-            num_cones = len(blolayer.cone_exprs)
+            new_sol_lagrangian = [np.empty_like(sol_numpy[k]) for k in range(len(sol_numpy))]
+            new_eq_dual = [np.empty_like(eq_dual[k]) for k in range(len(eq_dual))]
+            new_scalar_ineq_dual = [np.empty_like(scalar_ineq_dual[j]) for j in range(num_scalar_ineq)]
+            new_cone_dual_vals = [np.empty_like(cone_dual_vals[j]) for j in range(num_cones)]
 
-            new_scalar_ineq_dual = [
-                np.empty_like(scalar_ineq_dual[j]) 
-                for j in range(num_scalar_ineq)
-            ]
+            def _solve_one_backward(i):
+                slot = i if blolayer.num_copies >= B else 0
 
-            new_cone_dual_vals = [
-                np.empty_like(cone_dual_vals[j]) 
-                for j in range(num_cones)
-            ]
-
-            new_active_dual = [np.empty((B,) + c.shape, dtype=float) for c in blolayer.active_eq_constraints]
-            backward_time2 = time.time() - backward_start_time2
-            # print(f"Backward cloning time: {backward_time2}")
-            
-            sol_diffs = []
-            # print("Batch size: ", B)
-            for i in range(B):
-                backward_part1 = time.time()
+                # params for this batch element
                 if ctx.batch:
-                    params_numpy_i = [
-                        p[i] if bs > 0 else p
-                        for p, bs in zip(params_numpy, ctx.batch_sizes)
-                    ]
+                    params_i = [p[i] if bs > 0 else p for p, bs in zip(ctx.params_numpy, ctx.batch_sizes)]
                 else:
-                    params_numpy_i = params_numpy
-                
-                for j, _ in enumerate(blolayer.param_order):
-                    blolayer.param_order[j].value = params_numpy_i[j]
+                    params_i = ctx.params_numpy
 
-                for j, v in enumerate(blolayer.variables):
-                    blolayer.dvar_params[j].value = dvars_numpy[j][i]
-                    # Warm start
-                    v.value = ctx._warm_vars[j]
+                for p_val, param_obj in zip(params_i, blolayer.param_order_list[slot]):
+                    param_obj.value = p_val
 
-                for j, c in enumerate(blolayer.eq_constraints):
-                    if c.dual_value is None and ctx._warm_eq_duals[j] is not None:
-                        c.dual_value = ctx._warm_eq_duals[j]
-                for j, c in enumerate(blolayer.scalar_ineq_constraints):
-                    if c.dual_value is None and ctx._warm_ineq_duals[j] is not None:
-                        c.dual_value = ctx._warm_ineq_duals[j]
+                # dL/dv parameters + warm-start primal vars
+                for j, v in enumerate(blolayer.variables_list[slot]):
+                    blolayer.dvar_params_list[slot][j].value = dvars_numpy[j][i]
+                    v.value = ctx._warm_vars_list[i][j]
 
-                for j, _ in enumerate(blolayer.scalar_ineq_functions):
+                # forward eq dual as params
+                for j in range(len(blolayer.eq_functions_list[slot])):
+                    blolayer.eq_dual_params_list[slot][j].value = eq_dual[j][i]
+
+                # scalar ineq duals + active set masks
+                y_dim = dvars_numpy[0].shape[1] if dvars_numpy[0].ndim > 1 else dvars_numpy[0].shape[0]
+                num_eq = 0 if len(eq_dual) == 0 else (eq_dual[0].shape[1] if eq_dual[0].ndim > 1 else eq_dual[0].shape[0])
+
+                for j in range(num_scalar_ineq):
                     lam = scalar_ineq_dual[j][i]
                     lam = np.where(lam < -1e-6, lam, np.maximum(lam, 0.0))
+                    blolayer.scalar_ineq_dual_params_list[slot][j].value = lam
+
                     sl = scalar_ineq_slack[j][i]
-                    blolayer.scalar_ineq_dual_params[j].value = lam
-                    
                     mask = (sl <= blolayer.slack_tol).astype(np.float64)
                     if mask.sum() > max(1, y_dim - num_eq):
                         k = int(max(1, y_dim - num_eq))
@@ -719,156 +579,125 @@ def _BLOLayerFn(
                         mask_flat = np.zeros_like(lam_flat, dtype=np.float64)
                         mask_flat[idx] = 1.0
                         mask = mask_flat.reshape(lam.shape)
-                    blolayer.scalar_active_mask_params[j].value = mask
+                    blolayer.scalar_active_mask_params_list[slot][j].value = mask
 
-                _num_active_cones = 0
-                for j, _ in enumerate(blolayer.cone_exprs):
-                    g_star = ctx.cone_primal_vals[j][i, ...]   # g(x*)
-                    y_star = ctx.cone_dual_vals[j][i, ...]     # dual
-
-                    blolayer.cone_primal_star[j].value = g_star
-                    blolayer.cone_dual_params[j].value = y_star
+                # cone params + active mask
+                for j in range(num_cones):
+                    g_star = cone_primal_vals[j][i, ...]
+                    y_star = cone_dual_vals[j][i, ...]
+                    blolayer.cone_primal_star_list[slot][j].value = g_star
+                    blolayer.cone_dual_params_list[slot][j].value = y_star
 
                     y_norm = float(np.linalg.norm(y_star.reshape(-1), ord=np.inf))
-                    if y_norm > blolayer.dual_cutoff:
-                        # Cone constraint is active
-                        blolayer.cone_active_mask[j].value = 1.0
-                        _num_active_cones += 1
-                    else:
-                        blolayer.cone_active_mask[j].value = 0.0
-                    
-                # print(f"Number of active cones: {_num_active_cones}")
-
-                for j, _ in enumerate(blolayer.eq_functions):
-                    blolayer.eq_dual_params[j].value = eq_dual[j][i]
-                
-                # blolayer.perturbed_problem.solve(solver=cp.GUROBI, ignore_dpp=True, warm_start=True, **{"Threads": n_threads, "OutputFlag": 0})
-                # blolayer.perturbed_problem.solve(solver=cp.SCS, warm_start=True, ignore_dpp=True, max_iters=2500, eps=blolayer.eps)
-
-                # print(f"Backward part1 time: {time.time() - backward_part1}")
-
-                backward_part2 = time.time()
+                    blolayer.cone_active_mask_list[slot][j].value = 1.0 if y_norm > blolayer.dual_cutoff else 0.0
 
                 backward_solver_args = dict(ctx.solver_args)
-                if ctx.solver_args.get("solver") != cp.MOSEK:
-                    backward_solver_args["warm_start"] = True
-                
-                # blolayer.perturbed_problem.solve(**backward_solver_args)
-                blolayer.perturbed_problem.solve(solver=cp.SCS, warm_start=False, ignore_dpp=True, max_iters=2500, eps=1e-5)
-                
-                # print(f"Backward actual solving time: {time.time() - backward_part2}")
+                backward_solver_args["warm_start"] = False
+                backward_solver_args["verbose"] = False
+                # if ctx.solver_args.get("solver") != cp.MOSEK:
+                #     backward_solver_args["warm_start"] = True
 
-                # print(f"Backward compilation time: {blolayer.perturbed_problem.compilation_time}")
-                # print(f"Backward setup time: {blolayer.perturbed_problem.solver_stats.setup_time}")
-                # print(f"Backward solve time: {blolayer.perturbed_problem.solver_stats.solve_time}")
-                # print(f"Backward num iters: {blolayer.perturbed_problem.solver_stats.num_iters}")
-
-                # blolayer.perturbed_problem.solve(**ctx.solver_args)
-
-                backward_part3 = time.time()
-                st = blolayer.perturbed_problem.status
                 try:
-                    if st not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
-                        raise RuntimeError(f"New bilevel problem status = {st}")
-                    for j, v in enumerate(blolayer.variables):
-                        new_sol_lagrangian[j][i, ...] = v.value
-                        # sol_diff = np.linalg.norm(sol_numpy[j][i] - v.value)
-                        # sol_diffs.append(sol_diff)
-                except:
-                    print("Backward pass GUROBI failed, using OSQP")
-                    blolayer.perturbed_problem.solve(solver=cp.OSQP, eps_abs=1e-4, eps_rel=1e-4, warm_start=True, verbose=False)
-                    for j, v in enumerate(blolayer.variables):
-                        new_sol_lagrangian[j][i, ...] = v.value
-                        sol_diff = np.linalg.norm(sol_numpy[j][i] - v.value)
-                        sol_diffs.append(sol_diff)
-                
-                for c_id, c in enumerate(blolayer.eq_constraints):
-                    # if c.dual_value.any() == None:
-                    #     print(f"equality constraint {c_id} dual value is None")
-                    new_eq_dual[c_id][i, ...] = c.dual_value
-                for c_id, c in enumerate(blolayer.active_eq_constraints):
-                    # if c.dual_value.any() == None:
-                    #     print(f"active inequality constraint {c_id} dual value is None")
-                    # active_mask = np.array([a.value for a in blolayer.active_mask_params])
-                    new_active_dual[c_id][i, ...] = c.dual_value
+                    blolayer.perturbed_problem_list[slot].solve(**backward_solver_args)
+                except Exception:
+                    print("Backward pass SCS failed, using OSQP")
+                    exit()
+                    blolayer.perturbed_problem_list[slot].solve(solver=cp.OSQP, eps_abs=1e-4, eps_rel=1e-4,
+                                                                warm_start=True, verbose=False)
+
+                st = blolayer.perturbed_problem_list[slot].status
+                if st not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
+                    raise RuntimeError(f"New bilevel problem status = {st}")
+
+                new_sol_vals = [v.value for v in blolayer.variables_list[slot]]
+                new_eq_vals = [c.dual_value for c in blolayer.eq_constraints_list[slot]]
+                new_active_vals = [c.dual_value for c in blolayer.active_eq_constraints_list[slot]]
+
+                setup_time = getattr(blolayer.perturbed_problem_list[slot], "compilation_time", 0.0) or 0.0
+                solve_time = getattr(getattr(blolayer.perturbed_problem_list[slot], "solver_stats", None), "solve_time", 0.0) or 0.0
+                return new_sol_vals, new_eq_vals, new_active_vals, setup_time, solve_time
+
+            use_mt = (ThreadPool is not None) and (B > 1) and (blolayer.num_copies >= B)
+            if use_mt:
+                with threadpool_limits(limits=1):
+                    pool = ThreadPool(processes=min(B, n_threads))
+                    try:
+                        results = pool.map(_solve_one_backward, range(B))
+                    finally:
+                        pool.close()
+            else:
+                results = [_solve_one_backward(i) for i in range(B)]
+
+            avg_setup, avg_solve = 0.0, 0.0
+            for i, (new_sol_vals, new_eq_vals, new_active_vals, setup_t, solve_t) in enumerate(results):
+                for j in range(len(new_sol_lagrangian)):
+                    new_sol_lagrangian[j][i, ...] = new_sol_vals[j]
+                for j in range(len(new_eq_dual)):
+                    new_eq_dual[j][i, ...] = new_eq_vals[j]
+
+                # active duals: first scalar ineq, then cones
                 for j in range(num_scalar_ineq):
-                    lam_new = new_active_dual[j][i, ...]
-                    new_scalar_ineq_dual[j][i, ...] = lam_new
+                    new_scalar_ineq_dual[j][i, ...] = new_active_vals[j]
 
                 for j in range(num_cones):
                     idx = num_scalar_ineq + j
-                    lam_cone = float(new_active_dual[idx][i, ...])
-                    y_old    = cone_dual_vals[j][i, ...]
+                    lam_cone = float(np.asarray(new_active_vals[idx]).reshape(()))
+                    y_old = cone_dual_vals[j][i, ...]
                     new_cone_dual_vals[j][i, ...] = (1.0 + lam_cone) * y_old
 
-                # print(f"Backward part3 time: {time.time() - backward_part3}")
+                avg_setup += setup_t
+                avg_solve += solve_t
 
-            backward_time = time.time() - backward_start_time
-            # print(f"Backward solving time: {backward_time}")
-            
-            # print('--- sol_diff mean: ', np.mean(np.array(sol_diffs)), 'max: ', np.max(np.array(sol_diffs)), 'min: ', np.min(np.array(sol_diffs)))
+            info["backward_setup_time"] = avg_setup / max(1, B)
+            info["backward_solve_time"] = avg_solve / max(1, B)
 
+            # torch-side phi evaluation
             new_sol = [to_torch(v, ctx.dtype, ctx.device) for v in new_sol_lagrangian]
             new_eq_dual_torch  = [to_torch(v, ctx.dtype, ctx.device) for v in new_eq_dual]
             old_eq_dual_torch  = [to_torch(v, ctx.dtype, ctx.device) for v in eq_dual]
 
-            old_scalar_ineq_dual_torch = [
-                to_torch(v, ctx.dtype, ctx.device) for v in scalar_ineq_dual
-            ]
-            new_scalar_ineq_dual_torch = [
-                to_torch(v, ctx.dtype, ctx.device) for v in new_scalar_ineq_dual
-            ]
+            old_scalar_ineq_dual_torch = [to_torch(v, ctx.dtype, ctx.device) for v in scalar_ineq_dual]
+            new_scalar_ineq_dual_torch = [to_torch(v, ctx.dtype, ctx.device) for v in new_scalar_ineq_dual]
 
-            old_cone_dual_torch = [
-                to_torch(v, ctx.dtype, ctx.device)
-                for v in cone_dual_vals if v is not None
-            ]
-            new_cone_dual_torch = [
-                to_torch(v, ctx.dtype, ctx.device)
-                for v in new_cone_dual_vals
-            ]
+            old_cone_dual_torch = [to_torch(v, ctx.dtype, ctx.device) for v in cone_dual_vals]
+            new_cone_dual_torch = [to_torch(v, ctx.dtype, ctx.device) for v in new_cone_dual_vals]
 
-            start_time = time.time()
-            params_req = []
+            # rebuild leaf params for autograd
+            params_req2 = []
             for p, need in zip(ctx.params, req_grad_mask):
                 q = p.detach().clone()
                 if need:
                     q.requires_grad_(True)
-                params_req.append(q)
-            if ctx.device != torch.device('cpu'):
+                params_req2.append(q)
+
+            if ctx.device != torch.device("cpu"):
                 torch.set_default_device(torch.device(ctx.device))
+
             loss = 0.0
             with torch.enable_grad():
                 for i in range(B):
                     vars_new_i = [v[i] for v in new_sol]
-                    vars_old_i = [to_torch(sol_numpy[j][i], ctx.dtype, ctx.device) for j in range(len(blolayer.variables))]
-                    
-                    params_i = slice_params_for_batch(params_req, ctx.batch_sizes, i)
+                    vars_old_i = [to_torch(sol_numpy[j][i], ctx.dtype, ctx.device) for j in range(len(sol_numpy))]
+                    params_i = slice_params_for_batch(params_req2, ctx.batch_sizes, i)
 
-                    # eq dual
                     new_eq_dual_i  = [d[i] for d in new_eq_dual_torch]
                     old_eq_dual_i  = [d[i] for d in old_eq_dual_torch]
 
-                    # scalar ineq dual
-                    new_scalar_ineq_dual_i = [d[i] for d in new_scalar_ineq_dual_torch]
-                    old_scalar_ineq_dual_i = [d[i] for d in old_scalar_ineq_dual_torch]
+                    new_scalar_dual_i = [d[i] for d in new_scalar_ineq_dual_torch]
+                    old_scalar_dual_i = [d[i] for d in old_scalar_ineq_dual_torch]
 
-                    # cone dual
                     new_cone_dual_i = [d[i] for d in new_cone_dual_torch]
                     old_cone_dual_i = [d[i] for d in old_cone_dual_torch]
 
-                    phi_new_i = blolayer.phi_torch(*vars_new_i, *params_i, *new_eq_dual_i, *new_scalar_ineq_dual_i, *new_cone_dual_i)
-                    phi_old_i = blolayer.phi_torch(*vars_old_i, *params_i, *old_eq_dual_i, *old_scalar_ineq_dual_i, *old_cone_dual_i)
-                    loss +=  phi_new_i - phi_old_i
+                    phi_new_i = blolayer.phi_torch(*vars_new_i, *params_i, *new_eq_dual_i, *new_scalar_dual_i, *new_cone_dual_i)
+                    phi_old_i = blolayer.phi_torch(*vars_old_i, *params_i, *old_eq_dual_i, *old_scalar_dual_i, *old_cone_dual_i)
+                    loss = loss + (phi_new_i - phi_old_i)
 
                 loss = blolayer.alpha * loss
 
-            # loss.backward()
-            # grads = [p.grad for p in params_req]
-
             grads_req = torch.autograd.grad(
                 outputs=loss,
-                inputs=[q for q, need in zip(params_req, req_grad_mask) if need],
+                inputs=[q for q, need in zip(params_req2, req_grad_mask) if need],
                 allow_unused=True,
                 retain_graph=False,
             )
@@ -877,28 +706,14 @@ def _BLOLayerFn(
             it = iter(grads_req)
             for need in req_grad_mask:
                 grads.append(next(it) if need else None)
-            time_autograd = time.time() - start_time
-            # print(f"BLOLayer autograd time: {time_autograd}")
 
             if _compute_cos_sim:
-                with torch.no_grad():
-                    total_l2 = torch.sqrt(sum(
-                        (g.detach().float() ** 2).sum()
-                        for g in grads if g is not None
-                    ))
-                    total_inf = max(
-                        (g.detach().float().abs().max() for g in grads if g is not None)
-                    )
-
-                cos_sim, l2_norm = _compare_grads(params_req, [p.grad for p in params_req if p.requires_grad], ground_truth_grads)
-                print(f"cos_sim = {cos_sim:.6f}")
-                wandb.log({
-                    # "solution_distance": sol_dis,
-                    "grad_l2": total_l2,
-                    "grad_inf": total_inf,
-                    "cos_sim": cos_sim,
-                    "l2_norm": l2_norm,
-                })
+                cos_sim, l2_norm = _compare_grads(
+                    [q for q, need in zip(params_req2, req_grad_mask) if need],
+                    list(grads_req),
+                    list(ground_truth_grads),
+                )
+                wandb.log({"cos_sim": cos_sim, "l2_norm": l2_norm})
 
             return tuple(grads)
 

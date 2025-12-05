@@ -15,6 +15,7 @@ from ffocp_eq_timing import BLOLayer
 # from ffocp_eq_multithread import BLOLayer as BLOLayerMT
 from ffocp_eq_multithread_ghost import BLOLayer as BLOLayerMT
 from ffocp_eq_cone_general_not_dpp import BLOLayer as BLOLayerGeneral
+from ffocp_eq_cone_general_not_dpp_MT import BLOLayer as BLOLayerGeneralMT
 
 from qpthlocal.qp import QPFunction
 # from cvxpylayers.torch import CvxpyLayer
@@ -263,7 +264,7 @@ class OptModel(nn.Module):
             
             cone_dim = opt_dim
             problem, objective_fn, constraints, params, variables = setup_cvxpy_synthetic_problem_with_cones(opt_dim, self.num_ineq, cone_dim)
-            multithread = False
+            multithread = True
             if layer_type==FFOCP_EQ:
                 if not multithread:
                     self.optlayer = BLOLayerGeneral(problem, parameters=params, variables=variables, alpha=alpha, dual_cutoff=dual_cutoff, slack_tol=slack_tol, eps=1e-12)
@@ -272,12 +273,12 @@ class OptModel(nn.Module):
                     params_list = []
                     variables_list = []
                     for i in range(batch_size):
-                        problem, objective_fn, constraints, params, variables = setup_cvxpy_synthetic_problem(opt_dim, self.num_ineq)
+                        problem, objective_fn, constraints, params, variables = setup_cvxpy_synthetic_problem_with_cones(opt_dim, self.num_ineq, cone_dim)
                         problem_list.append(problem)
                         params_list.append(params)
                         variables_list.append(variables)
                     
-                    self.optlayer = BLOLayerMT(problem_list, parameters_list=params_list, variables_list=variables_list, alpha=alpha, dual_cutoff=dual_cutoff, slack_tol=slack_tol, eps=1e-12, backward_eps=1e-5)
+                    self.optlayer = BLOLayerGeneralMT(problem_list, parameters_list=params_list, variables_list=variables_list, alpha=alpha, dual_cutoff=dual_cutoff, slack_tol=slack_tol, eps=1e-12)
             elif layer_type==CVXPY_LAYER:
                 self.optlayer = CvxpyLayer(problem, parameters=params, variables=variables)
             elif layer_type==LPGD:
